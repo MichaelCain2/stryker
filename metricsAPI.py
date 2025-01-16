@@ -115,7 +115,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
                 logging.warning(f"No data points for metric: {metric_name} on host: {host}. Skipping.")
                 continue
 
-            for time, value in data_points:
+            for time, value in zip(data_points.get('timestamps', []), data_points.get('values', [])):
                 sheet.cell(row=row_idx, column=1, value=metric_name)
                 sheet.cell(row=row_idx, column=2, value=time)
                 sheet.cell(row=row_idx, column=3, value=value)
@@ -132,6 +132,19 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
             f = open(f"aggregated_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w")
         json.dump(aggregated_data, f, indent=4)
         logging.info("Aggregated data saved to aggregated_data.json for review.")
+
+def resolve_host_name(api_url, headers, entity_id):
+    """
+    Resolve a host's displayName using the Monitored Entities API.
+    """
+    url = f"{api_url}/entities/{entity_id}"
+    logging.debug(f"Resolving host name for entity ID: {entity_id}")
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+    display_name = data.get("displayName", "Unknown Host")
+    logging.debug(f"Resolved displayName: {display_name}")
+    return display_name
 
 def main():
     Tk().withdraw()
@@ -169,13 +182,17 @@ def main():
             logging.info(f"Metric data for {metric_name} saved to {metric_data_filename}")
 
         for entity in metric_data.get("entities", []):
-            host = entity.get("displayName", "Unknown Host")
-            logging.info(f"Processing entity for host: {host}")
-            if host not in aggregated_data:
-                aggregated_data[host] = {}
-            data_points = entity.get("dataPoints", [])
-            logging.debug(f"Data points for host {host}, metric {metric_name}: {data_points}")
-            aggregated_data[host][metric_name] = data_points
+            entity_id = entity.get("entityId")
+            display_name = resolve_host_name(api_url, headers, entity_id)
+            logging.info(f"Processing entity for host: {display_name}")
+            if display_name not in aggregated_data:
+                aggregated_data[display_name] = {}
+            data_points = {
+                "timestamps": entity.get("timestamps", []),
+                "values": entity.get("values", [])
+            }
+            logging.debug(f"Data points for host {display_name}, metric {metric_name}: {data_points}")
+            aggregated_data[display_name][metric_name] = data_points
 
     logging.debug(f"Final aggregated data: {aggregated_data}")
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
