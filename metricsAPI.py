@@ -1,5 +1,6 @@
 import requests
 import json
+import logging
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from openpyxl.styles import Font
@@ -8,6 +9,9 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 from datetime import datetime
 from tkinter import Tk, filedialog
+
+# Configure logging
+logging.basicConfig(filename='metrics_debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define thresholds for green, yellow, red
 thresholds = {
@@ -26,10 +30,10 @@ def fetch_metrics(api_url, headers, metric, entity_filter, management_zone, star
     Fetches metrics from Dynatrace using the Metrics API.
     """
     url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector=mzName(\"{management_zone}\")"
-    print(f"Fetching data from URL: {url}")  # Debugging: Print the crafted URL
+    logging.debug(f"Fetching data from URL: {url}")
     response = requests.get(url, headers=headers)
-    response.raise_for_status()  # Ensure the request was successful
-    print(f"Response for {metric}: {response.json()}")  # Debugging: Print the API response
+    response.raise_for_status()
+    logging.debug(f"Response for {metric}: {response.json()}")
     return response.json()
 
 def create_chart(chart_data, title, metric_name):
@@ -37,7 +41,7 @@ def create_chart(chart_data, title, metric_name):
     Create a bar chart for a given metric and save it to a BytesIO stream.
     Apply color coding based on thresholds.
     """
-    print(f"Creating chart for {metric_name} with data: {chart_data}")  # Debugging: Chart data
+    logging.debug(f"Creating chart for {metric_name} with data: {chart_data}")
     colors = []
     for value in chart_data[metric_name]:
         if value <= thresholds[metric_name]["green"]:
@@ -87,7 +91,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
     add_title_block(title_sheet, management_zone, start_time, num_servers)
 
     for host, metrics_data in aggregated_data.items():
-        print(f"Generating sheet for host: {host} with metrics: {metrics_data}")  # Debugging
+        logging.debug(f"Generating sheet for host: {host} with metrics: {metrics_data}")
         sheet = workbook.create_sheet(title=host[:31])
         sheet.cell(row=1, column=1, value="Metric")
         sheet.cell(row=1, column=2, value="Time")
@@ -95,7 +99,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
 
         row_idx = 2
         for metric_name, data_points in metrics_data.items():
-            print(f"Processing metric: {metric_name} with data points: {data_points}")  # Debugging
+            logging.debug(f"Processing metric: {metric_name} with data points: {data_points}")
             for time, value in data_points:
                 sheet.cell(row=row_idx, column=1, value=metric_name)
                 sheet.cell(row=row_idx, column=2, value=time)
@@ -107,7 +111,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
             sheet.add_image(img, f"E{row_idx - len(data_points)}")
 
     workbook.save(output_filename)
-    print(f"Excel report saved to {output_filename}")
+    logging.info(f"Excel report saved to {output_filename}")
 
 def main():
     Tk().withdraw()
@@ -132,17 +136,17 @@ def main():
 
     aggregated_data = {}
     for metric_name, metric_selector in metrics.items():
-        print(f"Fetching data for {metric_name}...")
+        logging.info(f"Fetching data for {metric_name}...")
         metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
-        print(f"Fetched metric data for {metric_name}: {metric_data}")  # Debugging
+        logging.debug(f"Fetched metric data for {metric_name}: {metric_data}")
         for entity in metric_data.get("entities", []):
             host = entity.get("displayName", "Unknown Host")
-            print(f"Processing entity for host: {host}")  # Debugging
+            logging.info(f"Processing entity for host: {host}")
             if host not in aggregated_data:
                 aggregated_data[host] = {}
             aggregated_data[host][metric_name] = entity.get("dataPoints", [])
 
-    print(f"Final aggregated data: {aggregated_data}")  # Debugging
+    logging.debug(f"Final aggregated data: {aggregated_data}")
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
     print("Generating the Excel report...")
     generate_excel_report(aggregated_data, management_zone, start_time, output_filename)
