@@ -26,9 +26,10 @@ def fetch_metrics(api_url, headers, metric, entity_filter, management_zone, star
     Fetches metrics from Dynatrace using the Metrics API.
     """
     url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector=mzName(\"{management_zone}\")"
-    print(f"Fetching data from URL: {url}")
+    print(f"Fetching data from URL: {url}")  # Debugging: Print the crafted URL
     response = requests.get(url, headers=headers)
-    response.raise_for_status()
+    response.raise_for_status()  # Ensure the request was successful
+    print(f"Response for {metric}: {response.json()}")  # Debugging: Print the API response
     return response.json()
 
 def create_chart(chart_data, title, metric_name):
@@ -36,6 +37,7 @@ def create_chart(chart_data, title, metric_name):
     Create a bar chart for a given metric and save it to a BytesIO stream.
     Apply color coding based on thresholds.
     """
+    print(f"Creating chart for {metric_name} with data: {chart_data}")  # Debugging: Chart data
     colors = []
     for value in chart_data[metric_name]:
         if value <= thresholds[metric_name]["green"]:
@@ -85,6 +87,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
     add_title_block(title_sheet, management_zone, start_time, num_servers)
 
     for host, metrics_data in aggregated_data.items():
+        print(f"Generating sheet for host: {host} with metrics: {metrics_data}")  # Debugging
         sheet = workbook.create_sheet(title=host[:31])
         sheet.cell(row=1, column=1, value="Metric")
         sheet.cell(row=1, column=2, value="Time")
@@ -92,6 +95,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
 
         row_idx = 2
         for metric_name, data_points in metrics_data.items():
+            print(f"Processing metric: {metric_name} with data points: {data_points}")  # Debugging
             for time, value in data_points:
                 sheet.cell(row=row_idx, column=1, value=metric_name)
                 sheet.cell(row=row_idx, column=2, value=time)
@@ -130,12 +134,15 @@ def main():
     for metric_name, metric_selector in metrics.items():
         print(f"Fetching data for {metric_name}...")
         metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
+        print(f"Fetched metric data for {metric_name}: {metric_data}")  # Debugging
         for entity in metric_data.get("entities", []):
-            host = entity["displayName"]
+            host = entity.get("displayName", "Unknown Host")
+            print(f"Processing entity for host: {host}")  # Debugging
             if host not in aggregated_data:
                 aggregated_data[host] = {}
-            aggregated_data[host][metric_name] = entity["dataPoints"]
+            aggregated_data[host][metric_name] = entity.get("dataPoints", [])
 
+    print(f"Final aggregated data: {aggregated_data}")  # Debugging
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
     print("Generating the Excel report...")
     generate_excel_report(aggregated_data, management_zone, start_time, output_filename)
