@@ -9,9 +9,13 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 from datetime import datetime
 from tkinter import Tk, filedialog
+import os
 
-# Configure logging
-logging.basicConfig(filename='metrics_debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging with dynamic filename
+log_filename = "metrics_debug.log"
+if os.path.exists(log_filename):
+    log_filename = f"metrics_debug_{datetime.now().strftime('%Y%m%d%H%M%S')}.log"
+logging.basicConfig(filename=log_filename, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Define thresholds for green, yellow, red
 thresholds = {
@@ -84,6 +88,9 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
     """
     Generate a new Excel report with a title block and charts.
     """
+    if os.path.exists(output_filename):
+        output_filename = f"Aggregated_Dynatrace_Report_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+
     workbook = Workbook()
     title_sheet = workbook.active
     title_sheet.title = "Report Summary"
@@ -121,6 +128,8 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
     workbook.save(output_filename)
     logging.info(f"Excel report saved to {output_filename}")
     with open("aggregated_data.json", "w") as f:
+        if os.path.exists("aggregated_data.json"):
+            f = open(f"aggregated_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w")
         json.dump(aggregated_data, f, indent=4)
         logging.info("Aggregated data saved to aggregated_data.json for review.")
 
@@ -150,12 +159,23 @@ def main():
         logging.info(f"Fetching data for {metric_name}...")
         metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
         logging.debug(f"Fetched metric data for {metric_name}: {metric_data}")
+
+        # Save full metric data for analysis
+        metric_data_filename = f"metric_data_{metric_name}.json"
+        if os.path.exists(metric_data_filename):
+            metric_data_filename = f"metric_data_{metric_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+        with open(metric_data_filename, "w") as f:
+            json.dump(metric_data, f, indent=4)
+            logging.info(f"Metric data for {metric_name} saved to {metric_data_filename}")
+
         for entity in metric_data.get("entities", []):
             host = entity.get("displayName", "Unknown Host")
             logging.info(f"Processing entity for host: {host}")
             if host not in aggregated_data:
                 aggregated_data[host] = {}
-            aggregated_data[host][metric_name] = entity.get("dataPoints", [])
+            data_points = entity.get("dataPoints", [])
+            logging.debug(f"Data points for host {host}, metric {metric_name}: {data_points}")
+            aggregated_data[host][metric_name] = data_points
 
     logging.debug(f"Final aggregated data: {aggregated_data}")
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
