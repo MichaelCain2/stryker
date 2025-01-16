@@ -84,6 +84,23 @@ def add_title_block(sheet, management_zone, start_time, num_servers):
         sheet.cell(row=idx, column=1, value=line)
         sheet.cell(row=idx, column=1).font = Font(bold=True)
 
+def aggregate_metric_data(metric_data, metric_name):
+    """
+    Aggregate timestamps and values from metric_data.
+    """
+    aggregated = {}
+    for entity in metric_data.get("entities", []):
+        host = entity.get("displayName", "Unknown Host")
+        timestamps = entity.get("dataPoints", {}).get("timestamps", [])
+        values = entity.get("dataPoints", {}).get("values", [])
+        if not timestamps or not values:
+            logging.warning(f"No data points found for metric: {metric_name}, host: {host}")
+            continue
+        if host not in aggregated:
+            aggregated[host] = {}
+        aggregated[host][metric_name] = list(zip(timestamps, values))
+    return aggregated
+
 def generate_excel_report(aggregated_data, management_zone, start_time, output_filename):
     """
     Generate a new Excel report with a title block and charts.
@@ -115,7 +132,7 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
                 logging.warning(f"No data points for metric: {metric_name} on host: {host}. Skipping.")
                 continue
 
-            for time, value in zip(data_points.get('timestamps', []), data_points.get('values', [])):
+            for time, value in data_points:
                 sheet.cell(row=row_idx, column=1, value=metric_name)
                 sheet.cell(row=row_idx, column=2, value=time)
                 sheet.cell(row=row_idx, column=3, value=value)
@@ -132,19 +149,6 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
             f = open(f"aggregated_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w")
         json.dump(aggregated_data, f, indent=4)
         logging.info("Aggregated data saved to aggregated_data.json for review.")
-
-def resolve_host_name(api_url, headers, entity_id):
-    """
-    Resolve a host's displayName using the Monitored Entities API.
-    """
-    url = f"{api_url}/entities/{entity_id}"
-    logging.debug(f"Resolving host name for entity ID: {entity_id}")
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    data = response.json()
-    display_name = data.get("displayName", "Unknown Host")
-    logging.debug(f"Resolved displayName: {display_name}")
-    return display_name
 
 def main():
     Tk().withdraw()
@@ -163,6 +167,9 @@ def main():
         "Processor": "builtin:host.cpu.usage",
         "Memory": "builtin:host.mem.usage",
         "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+        "Average Disk Idletime Percentage": "com.dynatrace.extension.host-observability.disk.usage.idle.percent",
+        "Disk Transfer Per Second": "com.dynatrace.extension.host-observability.disk.transfer.persec",
+        "Average Disk Queue Length": "builtin:host.disk.queueLength",
         "Network Adapter In": "builtin:host.net.nic.trafficIn",
         "Network Adapter Out": "builtin:host.net.nic.trafficOut"
     }
@@ -173,26 +180,12 @@ def main():
         metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
         logging.debug(f"Fetched metric data for {metric_name}: {metric_data}")
 
-        # Save full metric data for analysis
-        metric_data_filename = f"metric_data_{metric_name}.json"
-        if os.path.exists(metric_data_filename):
-            metric_data_filename = f"metric_data_{metric_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-        with open(metric_data_filename, "w") as f:
-            json.dump(metric_data, f, indent=4)
-            logging.info(f"Metric data for {metric_name} saved to {metric_data_filename}")
-
-        for entity in metric_data.get("entities", []):
-            entity_id = entity.get("entityId")
-            display_name = resolve_host_name(api_url, headers, entity_id)
-            logging.info(f"Processing entity for host: {display_name}")
-            if display_name not in aggregated_data:
-                aggregated_data[display_name] = {}
-            data_points = {
-                "timestamps": entity.get("timestamps", []),
-                "values": entity.get("values", [])
-            }
-            logging.debug(f"Data points for host {display_name}, metric {metric_name}: {data_points}")
-            aggregated_data[display_name][metric_name] = data_points
+        # Aggregate metric data
+        metric_aggregated = aggregate_metric_data(metric_data, metric_name)
+        for host, metrics in metric_aggregated.items():
+            if host not in aggregated_data:
+                aggregated_data[host] = {}
+            aggregated_data[host].update(metrics)
 
     logging.debug(f"Final aggregated data: {aggregated_data}")
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
