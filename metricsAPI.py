@@ -31,33 +31,20 @@ def fetch_metrics(api_url, headers, metric, entity_filter, management_zone, star
     response.raise_for_status()
     return response.json()
 
-def normalize_metric_data(metric_data):
-    """
-    Normalize and flatten the fetched metric data for easy writing to Excel.
-    """
-    normalized_data = []
-    for item in metric_data.get('items', []):
-        for datapoint in item.get('dataPoints', []):
-            normalized_data.append({
-                "Time": datapoint[0],
-                "Value": datapoint[1]
-            })
-    return pd.DataFrame(normalized_data)
-
 def create_chart(chart_data, title, metric_name):
     """
     Create a bar chart for a given metric and save it to a BytesIO stream.
     Apply color coding based on thresholds.
     """
     colors = []
-    if metric_name in chart_data:
-        for value in chart_data[metric_name]:
-            if value <= thresholds[metric_name]["green"]:
-                colors.append("green")
-            elif value <= thresholds[metric_name]["yellow"]:
-                colors.append("yellow")
-            else:
-                colors.append("red")
+    for value in chart_data[metric_name]:
+        if value <= thresholds[metric_name]["green"]:
+            colors.append("green")
+        elif value <= thresholds[metric_name]["yellow"]:
+            colors.append("yellow")
+        else:
+            colors.append("red")
+
     plt.figure(figsize=(8, 4))
     plt.bar(chart_data['Time'], chart_data[metric_name], color=colors)
     plt.title(title)
@@ -71,7 +58,7 @@ def create_chart(chart_data, title, metric_name):
     chart_stream.seek(0)
     return chart_stream
 
-def add_title_block(sheet, management_zone, start_time, metrics, num_servers):
+def add_title_block(sheet, management_zone, start_time, num_servers):
     """
     Add a title block to the top of the first sheet with report details.
     """
@@ -81,14 +68,13 @@ def add_title_block(sheet, management_zone, start_time, metrics, num_servers):
         f"Team Name/Management Zone: {management_zone}",
         f"Report Time: {report_time}",
         f"Report Duration: {start_time}",
-        f"Number of Servers: {num_servers}",
-        f"Resources: {', '.join(metrics)}",
+        f"Number of Servers: {num_servers}"
     ]
     for idx, line in enumerate(title_content, start=1):
         sheet.cell(row=idx, column=1, value=line)
         sheet.cell(row=idx, column=1).font = Font(bold=True)
 
-def generate_excel_report(aggregated_data, management_zone, start_time, metrics, output_filename):
+def generate_excel_report(aggregated_data, management_zone, start_time, output_filename):
     """
     Generate a new Excel report with a title block and charts.
     """
@@ -96,13 +82,26 @@ def generate_excel_report(aggregated_data, management_zone, start_time, metrics,
     title_sheet = workbook.active
     title_sheet.title = "Report Summary"
     num_servers = len(aggregated_data)
-    add_title_block(title_sheet, management_zone, start_time, metrics, num_servers)
-    for dimension, raw_data in aggregated_data.items():
-        df = normalize_metric_data(raw_data)
-        sheet = workbook.create_sheet(title=str(dimension)[:31])
-        for r_idx, row in enumerate(df.itertuples(index=False), start=1):
-            for c_idx, value in enumerate(row, start=1):
-                sheet.cell(row=r_idx, column=c_idx, value=value)
+    add_title_block(title_sheet, management_zone, start_time, num_servers)
+
+    for host, metrics_data in aggregated_data.items():
+        sheet = workbook.create_sheet(title=host[:31])
+        sheet.cell(row=1, column=1, value="Metric")
+        sheet.cell(row=1, column=2, value="Time")
+        sheet.cell(row=1, column=3, value="Value")
+
+        row_idx = 2
+        for metric_name, data_points in metrics_data.items():
+            for time, value in data_points:
+                sheet.cell(row=row_idx, column=1, value=metric_name)
+                sheet.cell(row=row_idx, column=2, value=time)
+                sheet.cell(row=row_idx, column=3, value=value)
+                row_idx += 1
+
+            chart_stream = create_chart(pd.DataFrame(data_points, columns=['Time', metric_name]), f"{metric_name} Trend", metric_name)
+            img = Image(chart_stream)
+            sheet.add_image(img, f"E{row_idx - len(data_points)}")
+
     workbook.save(output_filename)
     print(f"Excel report saved to {output_filename}")
 
@@ -113,28 +112,33 @@ def main():
     api_token = input("Enter your API Token: ").strip()
     management_zone = input("Enter the Management Zone: ").strip()
     start_time = input("Enter the start time (e.g., now-1w): ").strip()
-    metrics = {
-        "Processor": "builtin:host.cpu.usage",
-        "Memory": "builtin:host.mem.usage",
-        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
-        "Average Disk Idletime Percentage": "com.dynatrace.extension.host-observability.disk.usage.idle.percent",
-        "Disk Transfer Per Second": "com.dynatrace.extension.host-observability.disk.transfer.persec",
-        "Average Disk Queue Length": "builtin:host.disk.queueLength",
-        "Network Adapter In": "builtin:host.net.nic.trafficIn",
-        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
-    }
+
     headers = {
         "Authorization": f"Api-Token {api_token}",
         "Accept": "application/json; charset=utf-8"
     }
+
+    metrics = {
+        "Processor": "builtin:host.cpu.usage",
+        "Memory": "builtin:host.mem.usage",
+        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+        "Network Adapter In": "builtin:host.net.nic.trafficIn",
+        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
+    }
+
     aggregated_data = {}
     for metric_name, metric_selector in metrics.items():
         print(f"Fetching data for {metric_name}...")
         metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
-        aggregated_data[metric_name] = metric_data
+        for entity in metric_data.get("entities", []):
+            host = entity["displayName"]
+            if host not in aggregated_data:
+                aggregated_data[host] = {}
+            aggregated_data[host][metric_name] = entity["dataPoints"]
+
     output_filename = "Aggregated_Dynatrace_Report.xlsx"
     print("Generating the Excel report...")
-    generate_excel_report(aggregated_data, management_zone, start_time, metrics, output_filename)
+    generate_excel_report(aggregated_data, management_zone, start_time, output_filename)
 
 if __name__ == "__main__":
     main()
