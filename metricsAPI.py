@@ -92,6 +92,10 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
 
     for host, metrics_data in aggregated_data.items():
         logging.debug(f"Generating sheet for host: {host} with metrics: {metrics_data}")
+        if not metrics_data:
+            logging.warning(f"No metrics data found for host: {host}. Skipping sheet creation.")
+            continue
+
         sheet = workbook.create_sheet(title=host[:31])
         sheet.cell(row=1, column=1, value="Metric")
         sheet.cell(row=1, column=2, value="Time")
@@ -100,6 +104,10 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
         row_idx = 2
         for metric_name, data_points in metrics_data.items():
             logging.debug(f"Processing metric: {metric_name} with data points: {data_points}")
+            if not data_points:
+                logging.warning(f"No data points for metric: {metric_name} on host: {host}. Skipping.")
+                continue
+
             for time, value in data_points:
                 sheet.cell(row=row_idx, column=1, value=metric_name)
                 sheet.cell(row=row_idx, column=2, value=time)
@@ -112,6 +120,9 @@ def generate_excel_report(aggregated_data, management_zone, start_time, output_f
 
     workbook.save(output_filename)
     logging.info(f"Excel report saved to {output_filename}")
+    with open("aggregated_data.json", "w") as f:
+        json.dump(aggregated_data, f, indent=4)
+        logging.info("Aggregated data saved to aggregated_data.json for review.")
 
 def main():
     Tk().withdraw()
