@@ -140,3 +140,9 @@ def main():
 
     # Generate a PDF report
     output_filename = f"{management_zone.replace(':', '').replace(' ', '_')}-Aggregated_Dynatrace_Report-{datetime.now().strftime('%Y%m%d')}.pdf"
+    print("Generating the PDF report...")
+    generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename)
+    print(f"Report saved to {output_filename}")
+
+if __name__ == "__main__":
+    main()
