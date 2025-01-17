@@ -8,12 +8,33 @@ import pandas as pd
 from datetime import datetime
 from tkinter import Tk, filedialog
 
+# Define thresholds for green, yellow, red
+thresholds = {
+    "Processor": {"green": 50, "yellow": 90, "red": 100},
+    "Memory": {"green": 30, "yellow": 95, "red": 100},
+    "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
+    "Average Disk Utilzation Time": {"green": 60, "yellow": 85, "red": 100},
+    "Disk Write Time Per Second": {"green": 60, "yellow": 900, "red": 1000},
+    "Average Disk Queue Length": {"green": 75, "yellow": 200, "red": 500},
+    "Network Adapter In": {"green": 500000000, "yellow": 1000000000, "red": 1900000000},
+    "Network Adapter Out": {"green": 500000000, "yellow": 2000000000, "red": 2500000000}
+}
+
 def create_chart(chart_data, title, metric_name):
     """
     Create a bar chart for a given metric and save it to a BytesIO stream.
     """
+    colors = []
+    for value in chart_data[metric_name]:
+        if value <= thresholds[metric_name]["green"]:
+            colors.append("green")
+        elif value <= thresholds[metric_name]["yellow"]:
+            colors.append("yellow")
+        else:
+            colors.append("red")
+
     plt.figure(figsize=(8, 4))
-    plt.bar(chart_data['Time'], chart_data[metric_name], color='blue')
+    plt.bar(chart_data['Time'], chart_data[metric_name], color=colors)
     plt.title(title)
     plt.xlabel('Time')
     plt.ylabel(metric_name)
@@ -110,7 +131,7 @@ def main():
     management_zone = input("Enter the Management Zone: ").strip()
 
     # Simulate previously gathered start_time and metrics
-    start_time = "now-1w"  # Adjust based on your context
+    start_time = "Current"  # Adjust based on your context
     metrics = ["Processor", "Memory", "Logical Disks", "Network Adapter"]
 
     # Aggregate data from the existing report
@@ -118,10 +139,4 @@ def main():
     aggregated_data = aggregate_data_from_existing_report(file_path)
 
     # Generate a PDF report
-    output_filename = "Aggregated_Dynatrace_Support.pdf"
-    print("Generating the PDF report...")
-    generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename)
-    print(f"Report saved to {output_filename}")
-
-if __name__ == "__main__":
-    main()
+    output_filename = f"{management_zone.replace(':', '').replace(' ', '_')}-Aggregated_Dynatrace_Report-{datetime.now().strftime('%Y%m%d')}.pdf"
