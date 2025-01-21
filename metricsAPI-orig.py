@@ -1,12 +1,7 @@
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.utils import ImageReader
-from io import BytesIO
-import matplotlib.pyplot as plt
+import requests
 import pandas as pd
-from datetime import datetime
-from tkinter import Tk, filedialog
+import matplotlib.pyplot as plt
+from openpyxl import Workbook
 
 # Define thresholds for green, yellow, red
 thresholds = {
@@ -20,128 +15,120 @@ thresholds = {
     "Network Adapter Out": {"green": 500000000, "yellow": 2000000000, "red": 2500000000}
 }
 
-def create_chart(chart_data, title, metric_name):
+def fetch_metrics(api_url, headers, metric, entity_filter, mz_selector, start_time):
     """
-    Create a bar chart for a given metric and save it to a BytesIO stream.
+    Fetches metrics from Dynatrace using the Metrics API.
     """
-    colors = []
-    for value in chart_data[metric_name]:
-        if value <= thresholds[metric_name]["green"]:
-            colors.append("green")
-        elif value <= thresholds[metric_name]["yellow"]:
-            colors.append("yellow")
-        else:
-            colors.append("red")
+    url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector={mz_selector}"
+    print(f"Fetching data from URL: {url}")
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
 
-    plt.figure(figsize=(8, 4))
-    plt.bar(chart_data['Time'], chart_data[metric_name], color=colors)
-    plt.title(title)
-    plt.xlabel('Time')
-    plt.ylabel(metric_name)
-    plt.xticks(rotation=45, ha='right')
-
-    chart_stream = BytesIO()
-    plt.tight_layout()
-    plt.savefig(chart_stream, format='png')
-    plt.close()
-
-    chart_stream.seek(0)
-    return chart_stream
-
-def generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename):
+def generate_report(data, output_filename):
     """
-    Generate a PDF report with a title block and embedded charts.
+    Generates a report in Excel format with graphical representations.
     """
-    # Initialize the PDF document
-    pdf = SimpleDocTemplate(output_filename, pagesize=letter)
-    elements = []
+    writer = pd.ExcelWriter(output_filename, engine='openpyxl')
 
-    # Get the default style sheet
-    styles = getSampleStyleSheet()
-    title_style = styles['Heading2']
-    text_style = styles['Normal']
+    for metric_name, metric_data in data.items():
+        metric_result = metric_data.get("result", [])
+        if not metric_result:
+            print(f"No data found for {metric_name}. Skipping...")
+            continue
 
-    # Generate the title block
-    report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    duration = "Weekly" if "1w" in start_time else "Daily" if "1d" in start_time else "Custom"
-    num_servers = len(aggregated_data)
-    title_block = [
-        Paragraph(f"<b>Team Name/Management Zone:</b> {management_zone}", text_style),
-        Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
-        Paragraph(f"<b>Report Duration:</b> {start_time}", text_style),
-        Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
-        Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
-        Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
-        Spacer(1, 24)
-    ]
-    elements.extend(title_block)
+        rows = []
+        for result in metric_result:
+            for data_point in result.get("data", []):
+                dimension = data_point.get("dimensions", ["Unknown"])[0]
+                timestamps = data_point.get("timestamps", [])
+                values = data_point.get("values", [])
 
-    # Iterate through each Dimension (displayName) and its data
-    for dimension, df in aggregated_data.items():
-        # Add the displayName as the title
-        elements.append(Paragraph(f"<b>{dimension}</b>", style=title_style))
-        elements.append(Spacer(1, 24))
+                for ts, value in zip(timestamps, values):
+                    rows.append({"Dimension": dimension, "Time": pd.to_datetime(ts, unit='ms'), metric_name: value})
 
-        # Create and embed charts for each metric
-        for metric_name in df.columns:
-            if metric_name not in ['Dimension', 'Time']:
-                chart_stream = create_chart(df, f"{metric_name} Trend for {dimension}", metric_name)
-                img = Image(chart_stream, width=500, height=250)
-                elements.append(img)
-                elements.append(Spacer(1, 24))
+        df = pd.DataFrame(rows)
+        if df.empty:
+            print(f"No valid data for {metric_name}. Skipping...")
+            continue
 
-        # Add a page break after each Dimension
-        elements.append(Spacer(1, 24))
+        df.to_excel(writer, sheet_name=metric_name[:31], index=False)
 
-    # Build the PDF
-    pdf.build(elements)
-    print(f"PDF report saved to {output_filename}")
+        plt.figure(figsize=(10, 6))
+        for dimension in df["Dimension"].unique():
+            dimension_data = df[df["Dimension"] == dimension]
+            plt.plot(dimension_data["Time"], dimension_data[metric_name], label=dimension)
+        plt.title(f"Metrics: {metric_name}")
+        plt.xlabel("Time")
+        plt.ylabel("Value")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{metric_name}.png")
+        plt.close()
 
-def aggregate_data_from_existing_report(file_path):
+    writer.close()
+
+def fetch_host_name(api_url, headers, host_id):
     """
-    Read the existing Excel file and aggregate data for identical Dimensions across tabs.
+    Fetch human-readable hostname.
     """
-    df_dict = pd.read_excel(file_path, sheet_name=None)  # Read all tabs into a dictionary
-    aggregated_data = {}
+    base_url = api_url.split("metrics/query")[0]
+    url = f"{base_url}/entities/{host_id}"
 
-    for sheet_name, df in df_dict.items():
-        if 'Dimension' not in df.columns:
-            continue  # Skip sheets without the Dimension column
-        for dimension in df['Dimension'].unique():
-            if dimension not in aggregated_data:
-                aggregated_data[dimension] = []
-            dimension_data = df[df['Dimension'] == dimension]
-            aggregated_data[dimension].append(dimension_data)
-
-    for dimension in aggregated_data:
-        aggregated_data[dimension] = pd.concat(aggregated_data[dimension], ignore_index=True)
-
-    return aggregated_data
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+        display_name = entity_data.get("displayName", host_id)
+        print(f"Resolved {host_id} to {display_name}")
+        return display_name
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching display name for {host_id}: {e}")
+        return host_id
 
 def main():
-    # Ask for the location of the first spreadsheet
-    Tk().withdraw()
-    print("Please select the existing Dynatrace report file (Excel).")
-    file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
-    if not file_path:
-        print("No file selected. Exiting...")
-        return
+    print("Enter Dynatrace API Details:")
+    api_base_url = input("Enter the Dynatrace Metrics API URL: ").strip()
+    api_token = input("Enter your API Token: ").strip()
+    management_zone = input("Enter the Management Zone (e.g., ABC: VASI_1234): ").strip()
+    start_time = input("Enter the start time (e.g., now-1w): ").strip()
 
-    # Ask for Management Zone
-    management_zone = input("Enter the Management Zone: ").strip()
+    headers = {
+        "Authorization": f"Api-Token {api_token}",
+        "Accept": "application/json; charset=utf-8"
+    }
 
-    # Simulate previously gathered start_time and metrics
-    start_time = "Current"  # Adjust based on your context
-    metrics = ["Processor", "Memory", "Logical Disks", "Network Adapter"]
+    metrics = {
+        "Processor": "builtin:host.cpu.usage",
+        "Memory": "builtin:host.mem.usage",
+        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+        "Average Disk Utilzation Time": "builtin:host.disk.utilTime",
+        "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+        "Average Disk Queue Length": "builtin:host.disk.queueLength",
+        "Network Adapter In": "builtin:host.net.nic.trafficIn",
+        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
+    }
 
-    # Aggregate data from the existing report
-    print("Aggregating data from the existing report...")
-    aggregated_data = aggregate_data_from_existing_report(file_path)
+    entity_filter = 'type("HOST")'
+    mz_selector = f'mzName("{management_zone}")'
 
-    # Generate a PDF report
-    output_filename = "Aggregated_Dynatrace_Report.pdf"
-    print("Generating the PDF report...")
-    generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename)
+    data = {}
+    host_name_mapping = {}
+    for metric_name, metric_selector in metrics.items():
+        print(f"Fetching data for {metric_name}...")
+        metric_data = fetch_metrics(api_base_url, headers, metric_selector, entity_filter, mz_selector, start_time)
+        data[metric_name] = metric_data
+
+        for result in metric_data.get("result", []):
+            for data_point in result.get("data", []):
+                host_id = data_point.get("dimensions", ["Unknown"])[0]
+                if host_id not in host_name_mapping:
+                    host_name_mapping[host_id] = fetch_host_name(api_base_url, headers, host_id)
+                data_point["dimensions"][0] = host_name_mapping.get(host_id, host_id)
+
+    output_filename = "Dynatrace_Report.xlsx"
+    print("Generating report...")
+    generate_report(data, output_filename)
     print(f"Report saved to {output_filename}")
 
 if __name__ == "__main__":
