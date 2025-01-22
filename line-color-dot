@@ -1,0 +1,34 @@
+def create_line_chart(chart_data, title, metric_name):
+    """
+    Create a line chart with a solid blue line and colored points based on thresholds.
+    """
+    plt.figure(figsize=(8, 4))
+    
+    # Plot the solid line first
+    plt.plot(chart_data['Time'], chart_data[metric_name], color='blue', linestyle='-', label=metric_name)
+
+    # Overlay the colored points based on thresholds
+    for index, row in chart_data.iterrows():
+        color = (
+            "green" if row[metric_name] <= thresholds[metric_name]["green"] else
+            "yellow" if row[metric_name] <= thresholds[metric_name]["yellow"] else
+            "red"
+        )
+        plt.scatter(row['Time'], row[metric_name], color=color, edgecolors='black', s=50)  # Adjust `s` for point size
+
+    # Chart aesthetics
+    plt.title(title)
+    plt.xlabel('Time')
+    plt.ylabel(metric_name)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True)
+    plt.legend()
+
+    # Save chart to BytesIO
+    chart_stream = BytesIO()
+    plt.tight_layout()
+    plt.savefig(chart_stream, format='png')
+    plt.close()
+
+    chart_stream.seek(0)
+    return chart_stream
