@@ -1,0 +1,17 @@
+Some key aspects of 508 compliance include:
+	1.	Text Alternatives:
+	•	Images, graphs, and charts must include descriptive text (alt text) to ensure accessibility for screen readers.
+	2.	Keyboard Navigation:
+	•	All functionality must be operable through a keyboard interface, without requiring a mouse.
+	3.	Color Contrast:
+	•	Text and background colors must meet specific contrast ratios (typically 4.5:1 for regular text and 3:1 for large text) to ensure readability for users with visual impairments.
+	4.	Semantic Markup:
+	•	Properly structured HTML and tags for headings, lists, and tables ensure content is easy to navigate.
+	5.	Time-based Media:
+	•	Videos must include captions and audio descriptions. Audio-only content requires transcripts.
+	6.	Error Identification:
+	•	Forms and inputs must identify errors in a way that users can perceive, including through text-based feedback.
+	7.	Avoidance of Flashing Content:
+	•	Avoid any elements that flash more than three times per second to prevent triggering seizures.
+	8.	Document Accessibility:
+	•	PDFs and documents (e.g., Excel or Word files) must be accessible, including readable text, proper tagging, and navigable structure.
