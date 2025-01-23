@@ -6,46 +6,20 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 from tkinter import Tk, filedialog
-import logging
 
-# Configure logging
-log_filename = "agg2pdf_debug.log"
-logging.basicConfig(
-    filename=log_filename,
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 
-# Define thresholds for green, yellow, red
-thresholds = {
-    "Processor": {"green": 50, "yellow": 90, "red": 100},
-    "Memory": {"green": 30, "yellow": 95, "red": 100},
-    "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
-    "Average Disk Utilization Time": {"green": 60, "yellow": 85, "red": 100},
-    "Disk Write Time Per Second": {"green": 60, "yellow": 900, "red": 1000},
-    "Average Disk Queue Length": {"green": 75, "yellow": 200, "red": 500},
-    "Network Adapter In": {"green": 500000000, "yellow": 1000000000, "red": 1900000000},
-    "Network Adapter Out": {"green": 500000000, "yellow": 2000000000, "red": 2500000000},
-}
-
-def create_line_chart(chart_data, title, metric_name):
+def create_chart(chart_data, title, metric_name):
     """
     Create a line chart for a given metric and save it to a BytesIO stream.
-    Apply color coding based on thresholds.
     """
-    logging.debug(f"Creating line chart for metric: {metric_name}")
-    if metric_name not in chart_data.columns:
-        logging.error(f"Metric '{metric_name}' not found in data columns: {chart_data.columns}")
-        raise KeyError(f"Metric '{metric_name}' not found in chart data.")
-    
     plt.figure(figsize=(8, 4))
-    plt.plot(chart_data['Time'], chart_data[metric_name], marker='o', linestyle='-', label=metric_name, color="blue")
+    plt.plot(chart_data['Time'], chart_data[metric_name], marker='o', linestyle='-', color='blue', label=metric_name)
     plt.title(title)
     plt.xlabel('Time')
     plt.ylabel(metric_name)
     plt.xticks(rotation=45, ha='right')
-    plt.legend(loc='upper right')
     plt.grid(True)
+    plt.legend()
 
     chart_stream = BytesIO()
     plt.tight_layout()
@@ -55,9 +29,10 @@ def create_line_chart(chart_data, title, metric_name):
     chart_stream.seek(0)
     return chart_stream
 
-def generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename):
+
+def generate_pdf_report(aggregated_data, management_zone, output_filename):
     """
-    Generate a PDF report with a title block and embedded charts.
+    Generate a PDF report with a title block and embedded line charts for each host.
     """
     pdf = SimpleDocTemplate(output_filename, pagesize=letter)
     elements = []
@@ -68,61 +43,41 @@ def generate_pdf_report(aggregated_data, management_zone, start_time, metrics, o
 
     # Generate the title block
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    duration = "Weekly" if "1w" in start_time else "Daily" if "1d" in start_time else "Custom"
-    num_servers = len(aggregated_data)
-
     title_block = [
         Paragraph(f"<b>Team Name/Management Zone:</b> {management_zone}", text_style),
         Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
-        Paragraph(f"<b>Report Duration:</b> {start_time}", text_style),
-        Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
-        Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
-        Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
         Spacer(1, 24)
     ]
     elements.extend(title_block)
 
-    for dimension, df in aggregated_data.items():
-        elements.append(Paragraph(f"<b>{dimension}</b>", style=title_style))
+    for host, df in aggregated_data.items():
+        elements.append(Paragraph(f"<b>{host}</b>", style=title_style))
         elements.append(Spacer(1, 24))
 
-        for metric_name in metrics:
-            if metric_name in df.columns:
-                chart_stream = create_line_chart(df, f"{metric_name} Trend for {dimension}", metric_name)
+        for metric_name in df.columns:
+            if metric_name not in ['Time']:
+                chart_stream = create_chart(df, f"{metric_name} Trend for {host}", metric_name)
                 img = Image(chart_stream, width=500, height=250)
                 elements.append(img)
                 elements.append(Spacer(1, 24))
-            else:
-                logging.warning(f"Metric '{metric_name}' not found in host '{dimension}' data.")
-
-        elements.append(Spacer(1, 24))
 
     pdf.build(elements)
-    logging.info(f"PDF report saved to {output_filename}")
+    print(f"PDF report saved to {output_filename}")
 
-def aggregate_data_from_existing_report(file_path):
+
+def aggregate_data_from_workbook(file_path):
     """
-    Read the existing Excel file and aggregate data for identical Dimensions across tabs.
+    Read the existing Excel file and aggregate data for each host.
     """
-    logging.info(f"Reading Excel file: {file_path}")
     df_dict = pd.read_excel(file_path, sheet_name=None)
     aggregated_data = {}
 
     for sheet_name, df in df_dict.items():
-        if 'Metric' not in df.columns or 'Time' not in df.columns or 'Value' not in df.columns:
-            logging.warning(f"Sheet '{sheet_name}' does not have required columns. Skipping...")
-            continue
-        
-        df = df.rename(columns={'Metric': 'Dimension', 'Value': df['Metric'].iloc[0]})
         if 'Time' in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'])
-        if sheet_name not in aggregated_data:
             aggregated_data[sheet_name] = df
-        else:
-            aggregated_data[sheet_name] = pd.concat([aggregated_data[sheet_name], df], ignore_index=True)
 
-    logging.debug(f"Aggregated data: {aggregated_data.keys()}")
     return aggregated_data
+
 
 def main():
     Tk().withdraw()
@@ -133,20 +88,15 @@ def main():
         return
 
     management_zone = input("Enter the Management Zone: ").strip()
-    start_time = "now-1w"
-    metrics = [
-        "Processor", "Memory", "Average Disk Used Percentage",
-        "Average Disk Utilization Time", "Disk Write Time Per Second",
-        "Average Disk Queue Length", "Network Adapter In", "Network Adapter Out"
-    ]
+    output_filename = f"{management_zone.replace(':', '').replace(' ', '_')}-Aggregated_Dynatrace_Report-{datetime.now().strftime('%Y%m%d')}.pdf"
 
     print("Aggregating data from the existing report...")
-    aggregated_data = aggregate_data_from_existing_report(file_path)
+    aggregated_data = aggregate_data_from_workbook(file_path)
 
-    output_filename = f"{management_zone.replace(':', '_').replace(' ', '_')}_Aggregated_Dynatrace_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
     print("Generating the PDF report...")
-    generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename)
+    generate_pdf_report(aggregated_data, management_zone, output_filename)
     print(f"Report saved to {output_filename}")
+
 
 if __name__ == "__main__":
     main()
