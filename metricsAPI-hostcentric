@@ -1,55 +1,62 @@
 import requests
 import pandas as pd
+import matplotlib.pyplot as plt
 from openpyxl import Workbook
-from datetime import datetime
 
-def fetch_metrics(api_url, headers, metric, entity_filter, mz_selector, start_time):
+# Define thresholds for green, yellow, red
+thresholds = {
+    "Processor": {"green": 50, "yellow": 90, "red": 100},
+    "Memory": {"green": 30, "yellow": 95, "red": 100},
+    "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
+    "Average Disk Utilization Time": {"green": 60, "yellow": 85, "red": 100},
+    "Disk Write Time Per Second": {"green": 60, "yellow": 900, "red": 1000},
+    "Average Disk Queue Length": {"green": 75, "yellow": 200, "red": 500},
+    "Network Adapter In": {"green": 500000000, "yellow": 1000000000, "red": 1900000000},
+    "Network Adapter Out": {"green": 500000000, "yellow": 2000000000, "red": 2500000000}
+}
+
+def fetch_host_name(api_url, headers, host_id):
     """
-    Fetches metrics from Dynatrace using the Metrics API.
+    Resolve HOST-xxxx to a human-readable hostname using the Dynatrace API.
     """
-    url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector={mz_selector}"
-    print(f"Fetching data from URL: {url}")
+    base_url = api_url.split("metrics/query")[0]  # Base URL to access entity API
+    url = f"{base_url}/entities/{host_id}"
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+        return entity_data.get("displayName", host_id)  # Fallback to host_id if displayName is missing
+    except requests.exceptions.RequestException as e:
+        print(f"Error resolving hostname for {host_id}: {e}")
+        return host_id
+
+def fetch_metrics(api_url, headers, metric_selector, entity_filter, start_time):
+    """
+    Fetch metrics from Dynatrace using the Metrics API.
+    """
+    url = f"{api_url}?metricSelector={metric_selector}&entitySelector={entity_filter}&from={start_time}"
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return response.json()
 
-def resolve_hostnames(api_url, headers, host_ids):
+def generate_report(data, output_filename):
     """
-    Resolve host IDs to human-readable hostnames.
-    """
-    resolved_names = {}
-    for host_id in host_ids:
-        url = f"{api_url}/entities/{host_id}"
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            resolved_names[host_id] = response.json().get("displayName", host_id)
-        except requests.exceptions.RequestException:
-            resolved_names[host_id] = host_id
-    return resolved_names
-
-def generate_excel_report(data, resolved_hostnames, output_filename):
-    """
-    Generate an Excel report with one sheet per HOST containing all its metrics.
+    Generate an Excel report with metrics data per host.
     """
     workbook = Workbook()
-    workbook.remove(workbook.active)  # Remove default sheet
-
-    for host_id, metrics_data in data.items():
-        hostname = resolved_hostnames.get(host_id, host_id)
-        sheet = workbook.create_sheet(title=hostname[:31])
+    for host, metrics in data.items():
+        sheet = workbook.create_sheet(title=host[:31])  # Sheet names are limited to 31 characters
         sheet.append(["Metric", "Time", "Value"])
-
-        for metric_name, metric_values in metrics_data.items():
-            for time, value in metric_values:
-                sheet.append([metric_name, time, value])
+        for metric_name, metric_data in metrics.items():
+            for record in metric_data:
+                sheet.append([metric_name, record["time"], record["value"]])
 
     workbook.save(output_filename)
-    print(f"Excel report saved to {output_filename}")
+    print(f"Report saved to {output_filename}")
 
 def main():
-    print("Enter Dynatrace API Details:")
-    api_base_url = input("Enter the Dynatrace Metrics API URL: ").strip()
+    api_url = input("Enter the Dynatrace Metrics API URL: ").strip()
     api_token = input("Enter your API Token: ").strip()
     management_zone = input("Enter the Management Zone (e.g., ABC: VASI_1234): ").strip()
     start_time = input("Enter the start time (e.g., now-1w): ").strip()
@@ -70,36 +77,38 @@ def main():
         "Network Adapter Out": "builtin:host.net.nic.trafficOut"
     }
 
-    entity_filter = 'type("HOST")'
-    mz_selector = f'mzName("{management_zone}")'
-
-    data = {}
-    all_host_ids = set()
+    entity_filter = f'type("HOST") AND mzName("{management_zone}")'
+    resolved_hostnames = {}
+    aggregated_data = {}
 
     for metric_name, metric_selector in metrics.items():
         print(f"Fetching data for {metric_name}...")
-        metric_data = fetch_metrics(api_base_url, headers, metric_selector, entity_filter, mz_selector, start_time)
+        metric_data = fetch_metrics(api_url, headers, metric_selector, entity_filter, start_time)
 
         for result in metric_data.get("result", []):
             for data_point in result.get("data", []):
-                host_id = data_point.get("dimensions", ["Unknown"])[0]
-                all_host_ids.add(host_id)
+                host_id = data_point.get("dimensions", [None])[0]
 
-                if host_id not in data:
-                    data[host_id] = {}
-                if metric_name not in data[host_id]:
-                    data[host_id][metric_name] = []
+                # Resolve the host name if not already resolved
+                if host_id and host_id not in resolved_hostnames:
+                    resolved_hostnames[host_id] = fetch_host_name(api_url, headers, host_id)
+
+                host_name = resolved_hostnames.get(host_id, host_id)
+
+                if host_name not in aggregated_data:
+                    aggregated_data[host_name] = {}
+
+                if metric_name not in aggregated_data[host_name]:
+                    aggregated_data[host_name][metric_name] = []
 
                 timestamps = data_point.get("timestamps", [])
                 values = data_point.get("values", [])
-                data[host_id][metric_name].extend(zip(timestamps, values))
 
-    print("Resolving hostnames...")
-    resolved_hostnames = resolve_hostnames(api_base_url, headers, all_host_ids)
+                for time, value in zip(timestamps, values):
+                    aggregated_data[host_name][metric_name].append({"time": time, "value": value})
 
-    output_filename = "Dynatrace_Host_Report.xlsx"
-    print("Generating the Excel report...")
-    generate_excel_report(data, resolved_hostnames, output_filename)
+    output_filename = "Host_Centric_Report.xlsx"
+    generate_report(aggregated_data, output_filename)
 
 if __name__ == "__main__":
     main()
