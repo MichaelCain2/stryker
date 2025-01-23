@@ -1,94 +1,103 @@
 import requests
-import pandas as pd
-import matplotlib.pyplot as plt
+import json
+import logging
 from openpyxl import Workbook
 from datetime import datetime
+from tkinter import Tk, filedialog
 import os
 
-# Configure logging (optional but recommended for debugging)
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+log_filename = f"metrics_debug_{datetime.now().strftime('%Y%m%d%H%M%S')}.log"
+logging.basicConfig(filename=log_filename, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Define thresholds for green, yellow, red
-thresholds = {
-    "Processor": {"green": 50, "yellow": 90, "red": 100},
-    "Memory": {"green": 30, "yellow": 95, "red": 100},
-    "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
-    "Average Disk Utilization Time": {"green": 60, "yellow": 85, "red": 100},
-    "Disk Write Time Per Second": {"green": 60, "yellow": 900, "red": 1000},
-    "Average Disk Queue Length": {"green": 75, "yellow": 200, "red": 500},
-    "Network Adapter In": {"green": 500000000, "yellow": 1000000000, "red": 1900000000},
-    "Network Adapter Out": {"green": 500000000, "yellow": 2000000000, "red": 2500000000}
-}
-
-def fetch_metrics(api_url, headers, metric, entity_filter, mz_selector, start_time):
+def fetch_metrics(api_url, headers, metric, entity_filter, management_zone, start_time):
     """
-    Fetches metrics from Dynatrace using the Metrics API.
+    Fetch metrics data from Dynatrace using the Metrics API.
     """
-    url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector={mz_selector}"
-    logging.info(f"Fetching data from URL: {url}")
+    url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector=mzName(\"{management_zone}\")"
+    logging.debug(f"Fetching data from URL: {url}")
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return response.json()
 
-def aggregate_data_by_host(data, metric_name):
+def fetch_host_name(api_url, headers, host_id):
     """
-    Aggregate data by host.
+    Fetch the human-readable hostname for a given host ID.
     """
-    aggregated = {}
-    for result in data.get("result", []):
-        for data_point in result.get("data", []):
-            host = data_point.get("dimensions", ["Unknown"])[0]
-            timestamps = data_point.get("timestamps", [])
-            values = data_point.get("values", [])
+    base_url = api_url.split("metrics/query")[0]
+    url = f"{base_url}/entities/{host_id}"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+        display_name = entity_data.get("displayName", host_id)
+        logging.debug(f"Resolved {host_id} to {display_name}")
+        return display_name
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Error fetching display name for {host_id}: {e}")
+        return host_id
 
-            if host not in aggregated:
-                aggregated[host] = []
-
-            aggregated[host].extend([{"Metric": metric_name, "Time": ts, "Value": val} for ts, val in zip(timestamps, values)])
-
-    return aggregated
-
-def generate_excel_report(aggregated_data, output_filename):
+def generate_excel_report(aggregated_data, management_zone, start_time, output_filename):
     """
-    Generate an Excel report with one sheet per HOST.
+    Generate a host-centric Excel report with the metrics data.
     """
     workbook = Workbook()
     title_sheet = workbook.active
     title_sheet.title = "Report Summary"
-
-    # Add summary info (optional, can be expanded)
-    title_sheet.cell(row=1, column=1, value="HOST-Centric Report")
-    title_sheet.cell(row=2, column=1, value=f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    title_content = [
+        f"Management Zone: {management_zone}",
+        f"Report Time: {report_time}",
+        f"Start Time: {start_time}"
+    ]
+    for idx, line in enumerate(title_content, start=1):
+        title_sheet.cell(row=idx, column=1, value=line)
 
     for host, metrics_data in aggregated_data.items():
-        sheet = workbook.create_sheet(title=host[:31])  # Excel sheet names max 31 chars
-
-        # Add headers
+        sheet = workbook.create_sheet(title=host[:31])
         sheet.cell(row=1, column=1, value="Metric")
         sheet.cell(row=1, column=2, value="Time")
         sheet.cell(row=1, column=3, value="Value")
 
-        # Add data rows
-        for idx, row in enumerate(metrics_data, start=2):
-            sheet.cell(row=idx, column=1, value=row["Metric"])
-            sheet.cell(row=idx, column=2, value=datetime.fromtimestamp(row["Time"] / 1000).strftime('%Y-%m-%d %H:%M:%S'))
-            sheet.cell(row=idx, column=3, value=row["Value"])
-
-    # Save the workbook
-    if os.path.exists(output_filename):
-        base, ext = os.path.splitext(output_filename)
-        output_filename = f"{base}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+        row_idx = 2
+        for metric_name, data_points in metrics_data.items():
+            for timestamp, value in data_points:
+                sheet.cell(row=row_idx, column=1, value=metric_name)
+                sheet.cell(row=row_idx, column=2, value=timestamp)
+                sheet.cell(row=row_idx, column=3, value=value)
+                row_idx += 1
 
     workbook.save(output_filename)
     logging.info(f"Excel report saved to {output_filename}")
 
+def aggregate_metric_data(metric_data, metric_name, headers, api_url):
+    """
+    Aggregate metrics data and resolve hostnames.
+    """
+    aggregated = {}
+    for result in metric_data.get("result", []):
+        for data_point in result.get("data", []):
+            host_id = data_point.get("dimensions", ["Unknown"])[0]
+            timestamps = data_point.get("timestamps", [])
+            values = data_point.get("values", [])
+            if not timestamps or not values:
+                continue
+
+            if host_id not in aggregated:
+                display_name = fetch_host_name(api_url, headers, host_id)
+                aggregated[display_name] = {}
+            if metric_name not in aggregated[display_name]:
+                aggregated[display_name][metric_name] = []
+
+            aggregated[display_name][metric_name].extend(zip(timestamps, values))
+    return aggregated
+
 def main():
-    # User inputs
+    Tk().withdraw()
     print("Enter Dynatrace API Details:")
-    api_base_url = input("Enter the Dynatrace Metrics API URL: ").strip()
+    api_url = input("Enter the Dynatrace Metrics API URL: ").strip()
     api_token = input("Enter your API Token: ").strip()
-    management_zone = input("Enter the Management Zone (e.g., ABC: VASI_1234): ").strip()
+    management_zone = input("Enter the Management Zone: ").strip()
     start_time = input("Enter the start time (e.g., now-1w): ").strip()
 
     headers = {
@@ -96,7 +105,6 @@ def main():
         "Accept": "application/json; charset=utf-8"
     }
 
-    # Metrics to query
     metrics = {
         "Processor": "builtin:host.cpu.usage",
         "Memory": "builtin:host.mem.usage",
@@ -108,25 +116,19 @@ def main():
         "Network Adapter Out": "builtin:host.net.nic.trafficOut"
     }
 
-    # Define entity filter and management zone selector
-    entity_filter = 'type("HOST")'
-    mz_selector = f'mzName("{management_zone}")'
-
-    # Fetch and aggregate data
     aggregated_data = {}
     for metric_name, metric_selector in metrics.items():
         logging.info(f"Fetching data for {metric_name}...")
-        metric_data = fetch_metrics(api_base_url, headers, metric_selector, entity_filter, mz_selector, start_time)
-        aggregated_metric_data = aggregate_data_by_host(metric_data, metric_name)
-
-        for host, data_points in aggregated_metric_data.items():
+        metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
+        metric_aggregated = aggregate_metric_data(metric_data, metric_name, headers, api_url)
+        for host, metrics in metric_aggregated.items():
             if host not in aggregated_data:
-                aggregated_data[host] = []
-            aggregated_data[host].extend(data_points)
+                aggregated_data[host] = {}
+            aggregated_data[host].update(metrics)
 
-    # Generate the Excel report
-    output_filename = "HOST_Centric_Dynatrace_Report.xlsx"
-    generate_excel_report(aggregated_data, output_filename)
+    output_filename = f"{management_zone.replace(':', '_')}_Host_Centric_Report_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    print("Generating Excel report...")
+    generate_excel_report(aggregated_data, management_zone, start_time, output_filename)
 
 if __name__ == "__main__":
     main()
