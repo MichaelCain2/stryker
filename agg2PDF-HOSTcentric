@@ -20,7 +20,7 @@ thresholds = {
     "Processor": {"green": 50, "yellow": 90, "red": 100},
     "Memory": {"green": 30, "yellow": 95, "red": 100},
     "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
-    "Average Disk Utilization Time": {"green": 60, "yellow": 85, "red": 100},
+    "Average Disk Utilzation Time": {"green": 60, "yellow": 85, "red": 100},
     "Disk Write Time Per Second": {"green": 60, "yellow": 900, "red": 1000},
     "Average Disk Queue Length": {"green": 75, "yellow": 200, "red": 500},
     "Network Adapter In": {"green": 500000000, "yellow": 1000000000, "red": 1900000000},
@@ -30,35 +30,24 @@ thresholds = {
 def create_line_chart(chart_data, title, metric_name):
     """
     Create a line chart for a given metric and save it to a BytesIO stream.
+    Apply color coding based on thresholds.
     """
-    try:
-        logging.debug(f"Creating chart for {metric_name} with data: {chart_data.head()}")
+    plt.figure(figsize=(8, 4))
+    plt.plot(chart_data['Time'], chart_data[metric_name], marker='o', linestyle='-', color='blue', label=metric_name)
+    plt.title(title)
+    plt.xlabel('Time')
+    plt.ylabel(metric_name)
+    plt.xticks(chart_data['Time'], chart_data['Time'].dt.strftime('%Y-%m-%d %H:%M'), rotation=45, ha='right')
+    plt.grid(True)
+    plt.legend(loc="upper right")
 
-        plt.figure(figsize=(8, 4))
-        for dimension in chart_data['Metric'].unique():
-            dimension_data = chart_data[chart_data['Metric'] == dimension]
-            plt.plot(
-                dimension_data['Time'],
-                dimension_data['Value'],
-                label=dimension
-            )
+    chart_stream = BytesIO()
+    plt.tight_layout()
+    plt.savefig(chart_stream, format='png')
+    plt.close()
 
-        plt.title(title)
-        plt.xlabel('Time')
-        plt.ylabel(metric_name)
-        plt.legend(loc="upper right")
-        plt.grid(True)
-
-        chart_stream = BytesIO()
-        plt.tight_layout()
-        plt.savefig(chart_stream, format='png')
-        plt.close()
-
-        chart_stream.seek(0)
-        return chart_stream
-    except Exception as e:
-        logging.error(f"Error creating chart for {metric_name}: {e}")
-        return None
+    chart_stream.seek(0)
+    return chart_stream
 
 def generate_pdf_report(aggregated_data, management_zone, start_time, metrics, output_filename):
     """
