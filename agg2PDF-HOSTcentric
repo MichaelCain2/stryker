@@ -1,3 +1,4 @@
+import logging
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet
@@ -6,6 +7,13 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
 from tkinter import Tk, filedialog
+
+# Configure logging
+logging.basicConfig(
+    filename="agg2pdf_debug.log",
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # Define thresholds for green, yellow, red
 thresholds = {
@@ -24,17 +32,24 @@ def create_line_chart(chart_data, title, metric_name):
     Create a line chart for a given metric and save it to a BytesIO stream.
     Apply color coding based on thresholds.
     """
+    logging.debug(f"Creating chart for metric: {metric_name} with data:\n{chart_data}")
+    if 'Time' not in chart_data.columns or metric_name not in chart_data.columns:
+        logging.error(f"DataFrame for metric '{metric_name}' is missing required columns. Columns: {chart_data.columns}")
+        return None
+
     plt.figure(figsize=(8, 4))
-    plt.plot(chart_data['Time'], chart_data[metric_name], marker='o', linestyle='-', color='blue', label=metric_name)
+    for index, row in chart_data.iterrows():
+        color = "green" if row[metric_name] <= thresholds[metric_name]["green"] else \
+                "yellow" if row[metric_name] <= thresholds[metric_name]["yellow"] else "red"
+        plt.plot(row['Time'], row[metric_name], marker='o', color=color)
+
     plt.title(title)
     plt.xlabel('Time')
     plt.ylabel(metric_name)
     plt.xticks(rotation=45, ha='right')
-    plt.grid(True)
-    plt.legend(loc="upper right")
+    plt.tight_layout()
 
     chart_stream = BytesIO()
-    plt.tight_layout()
     plt.savefig(chart_stream, format='png')
     plt.close()
     chart_stream.seek(0)
@@ -67,39 +82,48 @@ def generate_pdf_report(aggregated_data, management_zone, start_time, metrics, o
     ]
     elements.extend(title_block)
 
-    # Iterate through each host and its data
-    for host, df in aggregated_data.items():
-        elements.append(Paragraph(f"<b>{host}</b>", style=title_style))
+    for dimension, df in aggregated_data.items():
+        logging.debug(f"Processing data for host: {dimension}")
+        elements.append(Paragraph(f"<b>{dimension}</b>", style=title_style))
         elements.append(Spacer(1, 24))
 
-        for metric_name in metrics:
-            if metric_name in df.columns:
-                chart_stream = create_line_chart(df, f"{metric_name} Trend for {host}", metric_name)
-                img = Image(chart_stream, width=500, height=250)
-                elements.append(img)
-                elements.append(Spacer(1, 24))
+        for metric_name in df.columns:
+            if metric_name not in ['Dimension', 'Time']:
+                chart_stream = create_line_chart(df, f"{metric_name} Trend for {dimension}", metric_name)
+                if chart_stream:
+                    img = Image(chart_stream, width=500, height=250)
+                    elements.append(img)
+                    elements.append(Spacer(1, 24))
+                else:
+                    logging.warning(f"Skipping chart creation for metric: {metric_name} due to missing data.")
 
         elements.append(Spacer(1, 24))
 
     pdf.build(elements)
-    print(f"PDF report saved to {output_filename}")
+    logging.info(f"PDF report saved to {output_filename}")
 
 def aggregate_data_from_existing_report(file_path):
     """
-    Read the existing Excel file and aggregate data for each host.
+    Read the existing Excel file and aggregate data for identical Dimensions across tabs.
     """
+    logging.debug(f"Reading Excel file: {file_path}")
     df_dict = pd.read_excel(file_path, sheet_name=None)
     aggregated_data = {}
 
     for sheet_name, df in df_dict.items():
-        if 'Metric' not in df.columns or 'Time' not in df.columns:
+        logging.debug(f"Processing sheet: {sheet_name}")
+        if 'Dimension' not in df.columns:
+            logging.warning(f"Sheet '{sheet_name}' missing 'Dimension' column. Skipping.")
             continue
+        for dimension in df['Dimension'].unique():
+            if dimension not in aggregated_data:
+                aggregated_data[dimension] = []
+            dimension_data = df[df['Dimension'] == dimension]
+            aggregated_data[dimension].append(dimension_data)
 
-        host = sheet_name
-        df['Time'] = pd.to_datetime(df['Time'])  # Ensure time is in datetime format
-
-        if host not in aggregated_data:
-            aggregated_data[host] = df
+    for dimension in aggregated_data:
+        aggregated_data[dimension] = pd.concat(aggregated_data[dimension], ignore_index=True)
+        logging.debug(f"Aggregated data for host: {dimension}\n{aggregated_data[dimension]}")
 
     return aggregated_data
 
@@ -112,15 +136,12 @@ def main():
         return
 
     management_zone = input("Enter the Management Zone: ").strip()
-    start_time = "now-1w"
-    metrics = [
-        "Processor", "Memory", "Average Disk Used Percentage",
-        "Average Disk Utilization Time", "Disk Write Time Per Second",
-        "Average Disk Queue Length", "Network Adapter In", "Network Adapter Out"
-    ]
+    start_time = "Current"
+    metrics = ["Processor", "Memory", "Logical Disks", "Network Adapter"]
 
     print("Aggregating data from the existing report...")
     aggregated_data = aggregate_data_from_existing_report(file_path)
+    logging.debug(f"Final aggregated data structure:\n{aggregated_data}")
 
     output_filename = f"{management_zone.replace(':', '_').replace(' ', '_')}_Aggregated_Dynatrace_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
     print("Generating the PDF report...")
