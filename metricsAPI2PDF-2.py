@@ -7,6 +7,7 @@ from reportlab.lib.pagesizes import letter
 from datetime import datetime
 import logging
 import tempfile
+import re
 
 # Configure logging
 logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -102,6 +103,12 @@ def create_pdf(graph_images, output_pdf):
     # Save PDF
     c.save()
 
+def sanitize_filename(filename):
+    """
+    Remove or replace invalid characters in a filename.
+    """
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
+
 def format_friendly_agg_date(agg_date):
     """
     Convert aggDate into a user-friendly format for filenames.
@@ -169,6 +176,7 @@ if __name__ == "__main__":
     friendly_agg_date = format_friendly_agg_date(AGG_TIME)
     run_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     OUTPUT_PDF = f"{MZ_SELECTOR}-{friendly_agg_date}Dynatrace_Metrics_Report-{run_date}.pdf"
+    OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)  # Sanitize the filename
 
     # Create PDF
     create_pdf(graph_buffers, output_pdf=OUTPUT_PDF)
