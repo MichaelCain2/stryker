@@ -5,21 +5,49 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     """
     Fetch metrics from the Dynatrace API.
     """
     query_url = f"{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type(HOST)&mzSelector=mzName(\"{mz_selector}\")"
+    logging.debug(f"Fetching metrics with URL: {query_url}")
     response = requests.get(query_url, headers=headers)
     response.raise_for_status()
+    logging.debug(f"API response: {response.json()}")
     return response.json()
+
+def parse_data(raw_data):
+    """
+    Parse the raw data to extract 'time' and 'value'. Handles missing keys gracefully.
+    """
+    try:
+        data = raw_data['result'][0]['data']
+        parsed_data = [
+            {"time": point.get("time", "Unknown"), "value": point.get("value", None)}
+            for point in data
+        ]
+        logging.debug(f"Parsed data: {parsed_data}")
+        return pd.DataFrame(parsed_data)
+    except (KeyError, IndexError) as e:
+        logging.error(f"Error parsing data: {e}")
+        logging.debug(f"Raw data structure: {raw_data}")
+        raise ValueError("Unexpected data structure in API response.")
 
 def generate_graph(data, thresholds, title="Metrics Report"):
     """
     Generate a graph with line and scatter plots and threshold lines.
     """
     plt.figure(figsize=(10, 6))
+
+    # Check for empty data
+    if data.empty:
+        logging.warning(f"No data available for graph '{title}'")
+        return None
 
     # Line plot
     plt.plot(data['time'], data['value'], label='Metric Value', color='blue', marker='o')
@@ -43,7 +71,7 @@ def generate_graph(data, thresholds, title="Metrics Report"):
     plt.close()
     return buffer
 
-def create_pdf(data, graph_images, output_pdf):
+def create_pdf(graph_images, output_pdf):
     """
     Create a PDF report embedding the graphs.
     """
@@ -57,11 +85,12 @@ def create_pdf(data, graph_images, output_pdf):
     # Add Graphs
     y_position = height - 150
     for img_buffer in graph_images:
-        c.drawImage(img_buffer, 50, y_position, width=500, height=300)
-        y_position -= 350
-        if y_position < 50:  # Add new page if space is insufficient
-            c.showPage()
-            y_position = height - 150
+        if img_buffer is not None:  # Skip empty graphs
+            c.drawImage(img_buffer, 50, y_position, width=500, height=300)
+            y_position -= 350
+            if y_position < 50:  # Add new page if space is insufficient
+                c.showPage()
+                y_position = height - 150
 
     # Save PDF
     c.save()
@@ -122,9 +151,12 @@ if __name__ == "__main__":
     # Iterate through metrics
     graph_buffers = []
     for metric_name, metric_selector in metrics.items():
-        raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
-        df = pd.DataFrame(raw_data['result'][0]['data'])
-        graph_buffers.append(generate_graph(df, thresholds[metric_name], title=metric_name))
+        try:
+            raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
+            df = parse_data(raw_data)
+            graph_buffers.append(generate_graph(df, thresholds[metric_name], title=metric_name))
+        except Exception as e:
+            logging.error(f"Failed to process metric '{metric_name}': {e}")
 
     # Format output PDF filename
     friendly_agg_date = format_friendly_agg_date(AGG_TIME)
@@ -132,6 +164,6 @@ if __name__ == "__main__":
     OUTPUT_PDF = f"{MZ_SELECTOR}-{friendly_agg_date}Dynatrace_Metrics_Report-{run_date}.pdf"
 
     # Create PDF
-    create_pdf(df, graph_buffers, output_pdf=OUTPUT_PDF)
+    create_pdf(graph_buffers, output_pdf=OUTPUT_PDF)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
