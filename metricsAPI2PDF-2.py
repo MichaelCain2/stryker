@@ -6,11 +6,11 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from datetime import datetime
 
-def fetch_metrics(api_url, headers, metric, entity_filter, mz_selector, agg_time):
+def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     """
     Fetch metrics from the Dynatrace API.
     """
-    query_url = f"{api_url}?metricSelector={metric}&from={agg_time}&entitySelector={entity_filter}&mzSelector={mz_selector}"
+    query_url = f"{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type(HOST)&mzSelector=mzName(\"{mz_selector}\")"
     response = requests.get(query_url, headers=headers)
     response.raise_for_status()
     return response.json()
@@ -114,8 +114,7 @@ if __name__ == "__main__":
     # Input parameters
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
-    ENTITY_FILTER = input("Enter Entity Filter: ").strip()
-    MZ_SELECTOR = input("Enter Management Zone Selector: ").strip()
+    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
@@ -123,7 +122,7 @@ if __name__ == "__main__":
     # Iterate through metrics
     graph_buffers = []
     for metric_name, metric_selector in metrics.items():
-        raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, ENTITY_FILTER, MZ_SELECTOR, AGG_TIME)
+        raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
         df = pd.DataFrame(raw_data['result'][0]['data'])
         graph_buffers.append(generate_graph(df, thresholds[metric_name], title=metric_name))
 
