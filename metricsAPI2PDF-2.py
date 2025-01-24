@@ -6,6 +6,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from datetime import datetime
 import logging
+import tempfile
 
 # Configure logging
 logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -86,7 +87,13 @@ def create_pdf(graph_images, output_pdf):
     y_position = height - 150
     for img_buffer in graph_images:
         if img_buffer is not None:  # Skip empty graphs
-            c.drawImage(img_buffer, 50, y_position, width=500, height=300)
+            # Write the BytesIO buffer to a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
+                temp_image.write(img_buffer.getvalue())
+                temp_image_path = temp_image.name
+
+            # Use the temporary file in drawImage
+            c.drawImage(temp_image_path, 50, y_position, width=500, height=300)
             y_position -= 350
             if y_position < 50:  # Add new page if space is insufficient
                 c.showPage()
