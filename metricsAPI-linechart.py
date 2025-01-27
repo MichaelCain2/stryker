@@ -106,11 +106,16 @@ def main():
 
     management_zone = input("Enter the Management Zone: ").strip()
     start_time = "now-1w"
-    metrics = [
-        "Processor", "Memory", "Average Disk Used Percentage",
-        "Average Disk Utilzation Time", "Disk Write Time Per Second",
-        "Average Disk Queue Length", "Network Adapter In", "Network Adapter Out"
-    ]
+    metrics = {
+        "Processor": "builtin:host.cpu.usage",
+        "Memory": "builtin:host.mem.usage",
+        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+        "Average Disk Utilization Time": "builtin:host.disk.utilTime",
+        "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+        "Average Disk Queue Length": "builtin:host.disk.queueLength",
+        "Network Adapter In": "builtin:host.net.nic.trafficIn",
+        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
+    }
 
     print("Aggregating data from the existing report...")
     aggregated_data = aggregate_data_from_existing_report(file_path)
