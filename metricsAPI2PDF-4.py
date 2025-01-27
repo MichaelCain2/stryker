@@ -38,16 +38,38 @@ def parse_data(raw_data):
     Parse the raw data to group metrics by host.
     """
     grouped_data = {}
-    for data in raw_data['result'][0]['data']:
-        host_name = data['dimensionMap'].get('hostName', data['dimensionMap'].get('entityId', 'Unknown'))
-        metric_id = raw_data['result'][0]['metricId']
-        timestamps = data.get('timestamps', [])
-        values = data.get('values', [])
+    try:
+        # Log the raw data structure for debugging
+        logging.debug(f"Raw data structure: {raw_data}")
 
-        if host_name not in grouped_data:
-            grouped_data[host_name] = {}
-        grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
-    return grouped_data
+        # Iterate through the data
+        for data in raw_data['result'][0]['data']:
+            dimension_map = data.get('dimensionMap', {})
+            # Updated host identification logic
+            host_name = dimension_map.get('hostName', dimension_map.get('entityId', None))
+            if not host_name:
+                logging.warning(f"Missing hostName or entityId in dimensionMap: {dimension_map}")
+                continue
+
+            metric_id = raw_data['result'][0]['metricId']
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
+
+            # Log identified host and metric
+            logging.debug(f"Processing host: {host_name}, Metric: {metric_id}")
+
+            if host_name not in grouped_data:
+                grouped_data[host_name] = {}
+
+            # Store timestamps and values under the metric name
+            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
+
+        logging.debug(f"Grouped Data After Parsing: {grouped_data}")
+        return grouped_data
+
+    except Exception as e:
+        logging.error(f"Error parsing data: {e}")
+        raise ValueError("Unexpected data structure in API response.")
 
 def generate_graph(timestamps, values, metric_name):
     """
