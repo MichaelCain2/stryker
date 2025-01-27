@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
 from datetime import datetime
 import logging
 import re
@@ -13,6 +11,18 @@ import tempfile
 
 # Configure logging
 logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Metrics definition
+metrics = {
+    "Processor": "builtin:host.cpu.usage",
+    "Memory": "builtin:host.mem.usage",
+    "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+    "Average Disk Utilization Time": "builtin:host.disk.utilTime",
+    "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+    "Average Disk Queue Length": "builtin:host.disk.queueLength",
+    "Network Adapter In": "builtin:host.net.nic.trafficIn",
+    "Network Adapter Out": "builtin:host.net.nic.trafficOut"
+}
 
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     """
@@ -33,13 +43,12 @@ def parse_data(raw_data):
     try:
         for data in raw_data['result'][0]['data']:
             host_name = data['dimensionMap'].get('hostName', 'Unknown')
-            metric_id = raw_data['result'][0]['metricId']
             timestamps = data['timestamps']
             values = data['values']
 
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
-            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values}
+            grouped_data[host_name] = {"timestamps": timestamps, "values": values}
 
         logging.debug(f"Grouped data: {grouped_data}")
         return grouped_data
@@ -65,31 +74,9 @@ def generate_graph(timestamps, values, metric_name):
     plt.close()
     return buffer
 
-def create_title_block(c, management_zone, report_time, start_time, duration, num_servers, metrics):
-    """
-    Create the title block at the top of the PDF.
-    """
-    styles = getSampleStyleSheet()
-    text_style = styles['Normal']
-
-    title_block = [
-        f"Team Name/Management Zone: {management_zone}",
-        f"Report Time: {report_time}",
-        f"Report Duration: {start_time}",
-        f"Data Aggregation: {duration}",
-        f"Number of Servers: {num_servers}",
-        f"Resources: {', '.join(metrics)}"
-    ]
-
-    y_position = 750
-    c.setFont("Helvetica", 12)
-    for line in title_block:
-        c.drawString(50, y_position, line)
-        y_position -= 20  # Adjust spacing
-
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
-    Create a PDF report with a title block and host-specific sections.
+    Create a PDF report organized by host, embedding the graphs for each metric.
     """
     c = canvas.Canvas(output_pdf, pagesize=letter)
     width, height = letter
@@ -99,22 +86,34 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     start_time = agg_time
     duration = "Custom Aggregation Period"  # Example; adjust based on agg_time
     num_servers = len(grouped_data)
-    metrics = list(grouped_data[next(iter(grouped_data))].keys())  # Example metrics list
-    create_title_block(c, management_zone, report_time, start_time, duration, num_servers, metrics)
+    metrics_list = list(metrics.keys())
 
-    y_position = height - 200
+    y_position = height - 50
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_position, f"Team Name/Management Zone: {management_zone}")
+    y_position -= 20
+    c.drawString(50, y_position, f"Report Time: {report_time}")
+    y_position -= 20
+    c.drawString(50, y_position, f"Report Duration: {start_time}")
+    y_position -= 20
+    c.drawString(50, y_position, f"Data Aggregation: {duration}")
+    y_position -= 20
+    c.drawString(50, y_position, f"Number of Servers: {num_servers}")
+    y_position -= 20
+    c.drawString(50, y_position, f"Resources: {', '.join(metrics_list)}")
+    y_position -= 40
 
     # Host-Specific Sections
-    for host_name, metrics in grouped_data.items():
+    for host_name, host_data in grouped_data.items():
         if y_position < 150:
             c.showPage()
-            y_position = height - 100
+            y_position = height - 50
 
         c.setFont("Helvetica-Bold", 14)
         c.drawString(50, y_position, f"Host: {host_name}")
         y_position -= 30
 
-        for metric_name, data in metrics.items():
+        for metric_name, data in host_data.items():
             c.setFont("Helvetica-Bold", 12)
             c.drawString(50, y_position, f"Metric: {metric_name}")
             y_position -= 20
@@ -130,7 +129,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
             if y_position < 150:
                 c.showPage()
-                y_position = height - 100
+                y_position = height - 50
 
     # Save PDF
     c.save()
@@ -149,17 +148,17 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    metrics = [
-        "builtin:host.cpu.usage",
-        "builtin:host.mem.usage",
-        "builtin:host.disk.usedPct",
-        "builtin:host.net.nic.trafficIn"
-    ]
-
     grouped_data = {}
-    for metric in metrics:
-        raw_data = fetch_metrics(API_URL, HEADERS, metric, MZ_SELECTOR, AGG_TIME)
-        grouped_data.update(parse_data(raw_data))
+    for metric_name, metric_selector in metrics.items():
+        try:
+            raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
+            parsed_data = parse_data(raw_data)
+            for host_name, data in parsed_data.items():
+                if host_name not in grouped_data:
+                    grouped_data[host_name] = {}
+                grouped_data[host_name][metric_name] = data
+        except Exception as e:
+            logging.error(f"Failed to fetch or process metric '{metric_name}': {e}")
 
     OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)
