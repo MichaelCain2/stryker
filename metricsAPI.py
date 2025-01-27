@@ -8,8 +8,9 @@ import logging
 import tempfile
 import re
 
-# Configure logging
-logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+# Configure logging with timestamp in filename
+log_filename = f"MetricAPI2PDF_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Metrics definition
 metrics = {
@@ -57,24 +58,42 @@ def parse_data(raw_data, api_url, headers):
     grouped_data = {}
     host_name_cache = {}
 
-    for data in raw_data['result'][0]['data']:
-        dimension_map = data.get('dimensionMap', {})
-        host_id = dimension_map.get('hostId', 'Unknown')
+    try:
+        logging.debug(f"Raw API Response: {raw_data}")
 
-        # Resolve host name using the Entities API
-        if host_id not in host_name_cache:
-            host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+        for data in raw_data['result'][0]['data']:
+            # Attempt to extract host information
+            dimension_map = data.get('dimensionMap', {})
+            host_id = dimension_map.get('hostId', None)
 
-        host_name = host_name_cache[host_id]
-        metric_id = raw_data['result'][0]['metricId']
-        timestamps = data.get('timestamps', [])
-        values = data.get('values', [])
+            if not host_id and 'dimensions' in data:
+                # Fallback to dimensions[0] for host ID
+                host_id = data['dimensions'][0]
 
-        if host_name not in grouped_data:
-            grouped_data[host_name] = {}
-        grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
+            if not host_id:
+                logging.warning(f"Cannot determine host ID for data point: {data}")
+                continue
 
-    return grouped_data
+            # Resolve the host name using the Entities API
+            if host_id not in host_name_cache:
+                host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+
+            host_name = host_name_cache.get(host_id, host_id)
+            metric_id = raw_data['result'][0]['metricId']
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
+
+            if host_name not in grouped_data:
+                grouped_data[host_name] = {}
+
+            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
+
+        logging.debug(f"Grouped Data: {grouped_data}")
+        return grouped_data
+
+    except Exception as e:
+        logging.error(f"Error parsing data: {e}")
+        raise
 
 def generate_graph(timestamps, values, metric_name):
     """
