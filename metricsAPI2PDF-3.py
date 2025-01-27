@@ -25,16 +25,19 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
 
 def parse_data(raw_data):
     """
-    Parse the raw data to extract 'time' and 'value'. Handles missing keys gracefully.
+    Parse the raw data to extract 'time', 'value', and 'entityId'. Handles missing keys gracefully.
     """
     try:
-        data = raw_data['result'][0]['data']
-        parsed_data = [
-            {"time": point.get("time", "Unknown"), "value": point.get("value", None)}
-            for point in data
-        ]
-        logging.debug(f"Parsed data: {parsed_data}")
-        return pd.DataFrame(parsed_data)
+        result = []
+        for data in raw_data['result'][0]['data']:
+            for point in data['dimensions']:
+                result.append({
+                    "entityId": point[0],  # Assuming entityId is the first dimension
+                    "time": point.get("time", "Unknown"),
+                    "value": point.get("value", None)
+                })
+        logging.debug(f"Parsed data: {result}")
+        return pd.DataFrame(result)
     except (KeyError, IndexError) as e:
         logging.error(f"Error parsing data: {e}")
         logging.debug(f"Raw data structure: {raw_data}")
@@ -44,7 +47,7 @@ def generate_graph(data, thresholds, title="Metrics Report"):
     """
     Generate a graph with line and scatter plots and threshold lines.
     """
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(8, 4))
 
     # Check for empty data
     if data.empty:
@@ -73,32 +76,38 @@ def generate_graph(data, thresholds, title="Metrics Report"):
     plt.close()
     return buffer
 
-def create_pdf(graph_images, output_pdf):
+def create_pdf(host_data, output_pdf):
     """
-    Create a PDF report embedding the graphs.
+    Create a PDF report organized by host, embedding the graphs for each metric.
     """
     c = canvas.Canvas(output_pdf, pagesize=letter)
     width, height = letter
 
-    # Title
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(100, height - 50, "Dynatrace Metrics Report")
+    for host, metrics in host_data.items():
+        # Host section title
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height - 50, f"Host: {host}")
+        y_position = height - 100
 
-    # Add Graphs
-    y_position = height - 150
-    for img_buffer in graph_images:
-        if img_buffer is not None:  # Skip empty graphs
-            # Write the BytesIO buffer to a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
-                temp_image.write(img_buffer.getvalue())
-                temp_image_path = temp_image.name
+        for metric_name, graph_image in metrics.items():
+            if graph_image is not None:  # Skip empty graphs
+                # Metric title
+                c.setFont("Helvetica-Bold", 12)
+                c.drawString(50, y_position, f"Metric: {metric_name}")
+                y_position -= 20
 
-            # Use the temporary file in drawImage
-            c.drawImage(temp_image_path, 50, y_position, width=500, height=300)
-            y_position -= 350
-            if y_position < 50:  # Add new page if space is insufficient
-                c.showPage()
-                y_position = height - 150
+                # Write the BytesIO buffer to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
+                    temp_image.write(graph_image.getvalue())
+                    temp_image_path = temp_image.name
+
+                # Use the temporary file in drawImage
+                c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
+                y_position -= 180
+
+                if y_position < 100:  # Add new page if space is insufficient
+                    c.showPage()
+                    y_position = height - 100
 
     # Save PDF
     c.save()
@@ -161,14 +170,17 @@ if __name__ == "__main__":
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
-    
-    # Iterate through metrics
-    graph_buffers = []
+
+    # Group metrics by host
+    host_data = {}
     for metric_name, metric_selector in metrics.items():
         try:
             raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
             df = parse_data(raw_data)
-            graph_buffers.append(generate_graph(df, thresholds[metric_name], title=metric_name))
+            for host, data in df.groupby("entityId"):
+                if host not in host_data:
+                    host_data[host] = {}
+                host_data[host][metric_name] = generate_graph(data, thresholds[metric_name], title=metric_name)
         except Exception as e:
             logging.error(f"Failed to process metric '{metric_name}': {e}")
 
@@ -179,6 +191,6 @@ if __name__ == "__main__":
     OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)  # Sanitize the filename
 
     # Create PDF
-    create_pdf(graph_buffers, output_pdf=OUTPUT_PDF)
+    create_pdf(host_data, output_pdf=OUTPUT_PDF)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
