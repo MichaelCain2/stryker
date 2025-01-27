@@ -1,196 +1,174 @@
 import requests
-import json
-import logging
-from openpyxl import Workbook
-from openpyxl.drawing.image import Image
-from openpyxl.styles import Font
-import pandas as pd
-from io import BytesIO
 import matplotlib.pyplot as plt
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 from datetime import datetime
-from tkinter import Tk, filedialog
-import os
+import logging
+import tempfile
+import re
 
-# Configure logging with dynamic filename
-log_filename = "metrics_debug.log"
-if os.path.exists(log_filename):
-    log_filename = f"metrics_debug_{datetime.now().strftime('%Y%m%d%H%M%S')}.log"
-logging.basicConfig(filename=log_filename, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(filename="MetricAPI2PDF_debug.log", level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Define thresholds for green, yellow, red
-thresholds = {
-    "Processor": {"green": 50, "yellow": 90, "red": 100},
-    "Memory": {"green": 30, "yellow": 95, "red": 100},
-    "Average Disk Used Percentage": {"green": 60, "yellow": 85, "red": 100},
-    "Average Disk Idletime Percentage": {"green": 60, "yellow": 85, "red": 100},
-    "Disk Transfer Per Second": {"green": 60, "yellow": 85, "red": 100},
-    "Average Disk Queue Length": {"green": 60, "yellow": 85, "red": 100},
-    "Network Adapter In": {"green": 20, "yellow": 70, "red": 100},
-    "Network Adapter Out": {"green": 20, "yellow": 70, "red": 100}
+# Metrics definition
+metrics = {
+    "Processor": "builtin:host.cpu.usage",
+    "Memory": "builtin:host.mem.usage",
+    "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+    "Average Disk Utilization Time": "builtin:host.disk.utilTime",
+    "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+    "Average Disk Queue Length": "builtin:host.disk.queueLength",
+    "Network Adapter In": "builtin:host.net.nic.trafficIn",
+    "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
 
-def fetch_metrics(api_url, headers, metric, entity_filter, management_zone, start_time):
+def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     """
-    Fetches metrics from Dynatrace using the Metrics API.
+    Fetch metrics from the Dynatrace API.
     """
-    url = f"{api_url}?metricSelector={metric}&from={start_time}&entitySelector={entity_filter}&mzSelector=mzName(\"{management_zone}\")"
-    logging.debug(f"Fetching data from URL: {url}")
-    response = requests.get(url, headers=headers)
+    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}")'
+    logging.debug(f"Fetching metrics with URL: {query_url}")
+    response = requests.get(query_url, headers=headers)
     response.raise_for_status()
-    logging.debug(f"Response for {metric}: {response.json()}")
     return response.json()
 
-def create_chart(chart_data, title, metric_name):
+def fetch_host_name(api_url, headers, host_id):
     """
-    Create a bar chart for a given metric and save it to a BytesIO stream.
-    Apply color coding based on thresholds.
+    Fetch human-readable hostname from the Entities API.
     """
-    logging.debug(f"Creating chart for {metric_name} with data: {chart_data}")
-    colors = []
-    for value in chart_data[metric_name]:
-        if value <= thresholds[metric_name]["green"]:
-            colors.append("green")
-        elif value <= thresholds[metric_name]["yellow"]:
-            colors.append("yellow")
-        else:
-            colors.append("red")
+    base_url = api_url.split("metrics/query")[0]  # Remove /metrics/query from the base URL
+    url = f"{base_url}/entities/{host_id}"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+        display_name = entity_data.get("displayName", host_id)  # Fallback to host_id if displayName is missing
+        logging.debug(f"Resolved {host_id} to {display_name}")
+        return display_name
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Error fetching display name for {host_id}: {e}")
+        return host_id
 
+def parse_data(raw_data, api_url, headers):
+    """
+    Parse the raw data to group metrics by host.
+    """
+    grouped_data = {}
+    host_name_cache = {}
+
+    for data in raw_data['result'][0]['data']:
+        dimension_map = data.get('dimensionMap', {})
+        host_id = dimension_map.get('hostId', 'Unknown')
+
+        # Resolve host name using the Entities API
+        if host_id not in host_name_cache:
+            host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+
+        host_name = host_name_cache[host_id]
+        metric_id = raw_data['result'][0]['metricId']
+        timestamps = data.get('timestamps', [])
+        values = data.get('values', [])
+
+        if host_name not in grouped_data:
+            grouped_data[host_name] = {}
+        grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
+
+    return grouped_data
+
+def generate_graph(timestamps, values, metric_name):
+    """
+    Generate a graph for the given metric.
+    """
     plt.figure(figsize=(8, 4))
-    plt.bar(chart_data['Time'], chart_data[metric_name], color=colors)
-    plt.title(title)
-    plt.xlabel('Time')
-    plt.ylabel(metric_name)
-    plt.xticks(rotation=45, ha='right')
-    chart_stream = BytesIO()
-    plt.tight_layout()
-    plt.savefig(chart_stream, format='png')
+    plt.plot(timestamps, values, label=metric_name, marker='o', color='blue')
+    plt.title(metric_name)
+    plt.xlabel("Time")
+    plt.ylabel("Value")
+    plt.grid(True)
+    plt.legend()
+
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
     plt.close()
-    chart_stream.seek(0)
-    return chart_stream
+    return buffer
 
-def add_title_block(sheet, management_zone, start_time, num_servers):
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
-    Add a title block to the top of the first sheet with report details.
+    Create a PDF report organized by host, embedding the graphs for each metric.
     """
+    c = canvas.Canvas(output_pdf, pagesize=letter)
+    width, height = letter
+
+    # Title Block
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    duration = "Weekly" if "1w" in start_time else "Daily" if "1d" in start_time else "Custom"
-    title_content = [
-        f"Team Name/Management Zone: {management_zone}",
-        f"Report Time: {report_time}",
-        f"Report Duration: {start_time}",
-        f"Number of Servers: {num_servers}"
-    ]
-    for idx, line in enumerate(title_content, start=1):
-        sheet.cell(row=idx, column=1, value=line)
-        sheet.cell(row=idx, column=1).font = Font(bold=True)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, height - 50, f"Team Name/Management Zone: {management_zone}")
+    c.drawString(50, height - 70, f"Report Time: {report_time}")
+    c.drawString(50, height - 90, f"Aggregation Period: {agg_time}")
 
-def aggregate_metric_data(metric_data, metric_name):
-    """
-    Aggregate timestamps and values from metric_data.
-    """
-    aggregated = {}
-    for entity in metric_data.get("entities", []):
-        host = entity.get("displayName", "Unknown Host")
-        timestamps = entity.get("dataPoints", {}).get("timestamps", [])
-        values = entity.get("dataPoints", {}).get("values", [])
-        if not timestamps or not values:
-            logging.warning(f"No data points found for metric: {metric_name}, host: {host}")
-            continue
-        if host not in aggregated:
-            aggregated[host] = {}
-        aggregated[host][metric_name] = list(zip(timestamps, values))
-    return aggregated
+    y_position = height - 130
 
-def generate_excel_report(aggregated_data, management_zone, start_time, output_filename):
-    """
-    Generate a new Excel report with a title block and charts.
-    """
-    if os.path.exists(output_filename):
-        output_filename = f"Aggregated_Dynatrace_Report_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+    # Host-Specific Sections
+    for host_name, metrics_data in grouped_data.items():
+        if y_position < 150:
+            c.showPage()
+            y_position = height - 50
 
-    workbook = Workbook()
-    title_sheet = workbook.active
-    title_sheet.title = "Report Summary"
-    num_servers = len(aggregated_data)
-    add_title_block(title_sheet, management_zone, start_time, num_servers)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, y_position, f"Host: {host_name}")
+        y_position -= 30
 
-    for host, metrics_data in aggregated_data.items():
-        logging.debug(f"Generating sheet for host: {host} with metrics: {metrics_data}")
-        if not metrics_data:
-            logging.warning(f"No metrics data found for host: {host}. Skipping sheet creation.")
-            continue
-
-        sheet = workbook.create_sheet(title=host[:31])
-        sheet.cell(row=1, column=1, value="Metric")
-        sheet.cell(row=1, column=2, value="Time")
-        sheet.cell(row=1, column=3, value="Value")
-
-        row_idx = 2
-        for metric_name, data_points in metrics_data.items():
-            logging.debug(f"Processing metric: {metric_name} with data points: {data_points}")
-            if not data_points:
-                logging.warning(f"No data points for metric: {metric_name} on host: {host}. Skipping.")
+        for metric_name, data in metrics_data.items():
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
+            if not timestamps or not values:
                 continue
 
-            for time, value in data_points:
-                sheet.cell(row=row_idx, column=1, value=metric_name)
-                sheet.cell(row=row_idx, column=2, value=time)
-                sheet.cell(row=row_idx, column=3, value=value)
-                row_idx += 1
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(50, y_position, f"Metric: {metric_name}")
+            y_position -= 20
 
-            chart_stream = create_chart(pd.DataFrame(data_points, columns=['Time', metric_name]), f"{metric_name} Trend", metric_name)
-            img = Image(chart_stream)
-            sheet.add_image(img, f"E{row_idx - len(data_points)}")
+            graph = generate_graph(timestamps, values, metric_name)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
+                temp_image.write(graph.getvalue())
+                temp_image_path = temp_image.name
 
-    workbook.save(output_filename)
-    logging.info(f"Excel report saved to {output_filename}")
-    with open("aggregated_data.json", "w") as f:
-        if os.path.exists("aggregated_data.json"):
-            f = open(f"aggregated_data_{datetime.now().strftime('%Y%m%d%H%M%S')}.json", "w")
-        json.dump(aggregated_data, f, indent=4)
-        logging.info("Aggregated data saved to aggregated_data.json for review.")
+            c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
+            y_position -= 180
 
-def main():
-    Tk().withdraw()
-    print("Enter Dynatrace API Details:")
-    api_url = input("Enter the Dynatrace Metrics API URL: ").strip()
-    api_token = input("Enter your API Token: ").strip()
-    management_zone = input("Enter the Management Zone: ").strip()
-    start_time = input("Enter the start time (e.g., now-1w): ").strip()
+            if y_position < 150:
+                c.showPage()
+                y_position = height - 50
 
-    headers = {
-        "Authorization": f"Api-Token {api_token}",
-        "Accept": "application/json; charset=utf-8"
-    }
+    c.save()
 
-    metrics = {
-        "Processor": "builtin:host.cpu.usage",
-        "Memory": "builtin:host.mem.usage",
-        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
-        "Average Disk Utilization Time": "builtin:host.disk.utilTime",
-        "Disk Write Time Per Second": "builtin:host.disk.writeTime",
-        "Average Disk Queue Length": "builtin:host.disk.queueLength",
-        "Network Adapter In": "builtin:host.net.nic.trafficIn",
-        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
-    }
-
-    aggregated_data = {}
-    for metric_name, metric_selector in metrics.items():
-        logging.info(f"Fetching data for {metric_name}...")
-        metric_data = fetch_metrics(api_url, headers, metric_selector, 'type("HOST")', management_zone, start_time)
-        logging.debug(f"Fetched metric data for {metric_name}: {metric_data}")
-
-        # Aggregate metric data
-        metric_aggregated = aggregate_metric_data(metric_data, metric_name)
-        for host, metrics in metric_aggregated.items():
-            if host not in aggregated_data:
-                aggregated_data[host] = {}
-            aggregated_data[host].update(metrics)
-
-    logging.debug(f"Final aggregated data: {aggregated_data}")
-    output_filename = "Aggregated_Dynatrace_Report.xlsx"
-    print("Generating the Excel report...")
-    generate_excel_report(aggregated_data, management_zone, start_time, output_filename)
+def sanitize_filename(filename):
+    """
+    Remove or replace invalid characters in a filename.
+    """
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
 if __name__ == "__main__":
-    main()
+    API_URL = input("Enter API URL: ").strip()
+    API_TOKEN = input("Enter API Token: ").strip()
+    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
+    AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
+
+    HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
+
+    grouped_data = {}
+    for metric_name, metric_selector in metrics.items():
+        raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
+        parsed_data = parse_data(raw_data, API_URL, HEADERS)
+        for host_name, data in parsed_data.items():
+            if host_name not in grouped_data:
+                grouped_data[host_name] = {}
+            grouped_data[host_name][metric_name] = data
+
+    OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
+    OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)
+    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+
+    print(f"PDF report generated: {OUTPUT_PDF}")
