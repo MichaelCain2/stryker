@@ -169,12 +169,16 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
 def sanitize_filename(filename):
     """
-    Remove or replace invalid characters in a filename, ensuring no unnecessary spaces.
+    Sanitize the filename by replacing specific patterns while preserving other conventions.
     """
-    # Replace colons with underscores and remove extra spaces
-    sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()  # Remove multiple spaces
-    return sanitized
+    if ':' in filename:
+        # Handle specific 'ABC: ABCD_1234' convention
+        filename = re.sub(r'\s*:\s*', '_', filename)  # Replace colon and surrounding spaces with _
+    # Remove other invalid characters
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Strip leading/trailing spaces
+    filename = filename.strip()
+    return filename
 
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
