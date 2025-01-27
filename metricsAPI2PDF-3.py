@@ -42,12 +42,14 @@ def parse_data(raw_data):
     try:
         for data in raw_data['result'][0]['data']:
             host_name = data['dimensionMap'].get('hostName', 'Unknown')
-            metric_id = raw_data['result'][0]['metricId']
-            timestamps = data['timestamps']
-            values = data['values']
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
 
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
+
+            # Store timestamps and values under the metric name
+            metric_id = raw_data['result'][0]['metricId']
             grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values}
 
         logging.debug(f"Grouped data: {grouped_data}")
@@ -55,7 +57,6 @@ def parse_data(raw_data):
     except Exception as e:
         logging.error(f"Error parsing data: {e}")
         raise ValueError("Unexpected data structure in API response.")
-
 def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric.
