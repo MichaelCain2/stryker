@@ -164,15 +164,15 @@ def main():
     }
 
     metrics = {
-        "Processor": "builtin:host.cpu.usage",
-        "Memory": "builtin:host.mem.usage",
-        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
-        "Average Disk Idletime Percentage": "com.dynatrace.extension.host-observability.disk.usage.idle.percent",
-        "Disk Transfer Per Second": "com.dynatrace.extension.host-observability.disk.transfer.persec",
-        "Average Disk Queue Length": "builtin:host.disk.queueLength",
-        "Network Adapter In": "builtin:host.net.nic.trafficIn",
-        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
-    }
+        "Processor": "builtin:host.cpu.usage",
+        "Memory": "builtin:host.mem.usage",
+        "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+        "Average Disk Utilization Time": "builtin:host.disk.utilTime",
+        "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+        "Average Disk Queue Length": "builtin:host.disk.queueLength",
+        "Network Adapter In": "builtin:host.net.nic.trafficIn",
+        "Network Adapter Out": "builtin:host.net.nic.trafficOut"
+    }
 
     aggregated_data = {}
     for metric_name, metric_selector in metrics.items():
