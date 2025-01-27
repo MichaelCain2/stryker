@@ -118,6 +118,12 @@ def sanitize_filename(filename):
     """
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
+def sanitize_mz_selector(mz_selector):
+    """
+    Remove or replace invalid characters in the Management Zone name.
+    """
+    return re.sub(r'[<>:"/\\|?*]', '_', mz_selector)
+
 def format_friendly_agg_date(agg_date):
     """
     Convert aggDate into a user-friendly format for filenames.
@@ -167,6 +173,7 @@ if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
+    MZ_SELECTOR = sanitize_mz_selector(MZ_SELECTOR)  # Sanitize Management Zone name
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
