@@ -152,6 +152,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     # Host-Specific Sections
     for host_name, metrics_data in grouped_data.items():
+        logging.debug(f"Processing host: {host_name}")
         if y_position < 150:
             c.showPage()
             y_position = height - 50
@@ -164,7 +165,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
-            logging.debug(f"Processing metric '{metric_name}' for host '{host_name}': Timestamps: {timestamps}, Values: {values}")
+            logging.debug(f"Metric '{metric_name}' for host '{host_name}': Timestamps: {timestamps}, Values: {values}")
 
             if not timestamps or not values:
                 logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing data.")
@@ -216,8 +217,7 @@ if __name__ == "__main__":
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
     grouped_data = {}
-    for metric_name, metric_selector in metrics.items:
-        for metric_name, metric_selector in metrics.items():
+    for metric_name, metric_selector in metrics.items():
         raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
         parsed_data = parse_data(raw_data, API_URL, HEADERS)
         for host_name, data in parsed_data.items():
@@ -225,7 +225,6 @@ if __name__ == "__main__":
                 grouped_data[host_name] = {}
             grouped_data[host_name][metric_name] = data
 
-    # Generate the PDF with sanitized filename
     OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)
     create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
