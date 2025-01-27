@@ -120,14 +120,18 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c = canvas.Canvas(output_pdf, pagesize=letter)
     width, height = letter
 
+    # Calculate the number of unique hosts
+    num_hosts = len(grouped_data)
+
     # Title Block
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, height - 50, f"Team Name/Management Zone: {management_zone}")
     c.drawString(50, height - 70, f"Report Time: {report_time}")
     c.drawString(50, height - 90, f"Aggregation Period: {agg_time}")
+    c.drawString(50, height - 110, f"Number of Hosts: {num_hosts}")
 
-    y_position = height - 130
+    y_position = height - 150
 
     # Host-Specific Sections
     for host_name, metrics_data in grouped_data.items():
