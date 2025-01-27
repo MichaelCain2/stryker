@@ -202,4 +202,18 @@ def sanitize_filename(filename):
         # Handle specific 'ABC: ABCD_1234' convention
         filename = re.sub(r'\s*:\s*', '_', filename)  # Replace colon and surrounding spaces with _
     # Remove other invalid characters
-    filename = re.sub(r'[<>:"/\\
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Strip leading/trailing spaces
+    filename = filename.strip()
+    return filename
+
+if __name__ == "__main__":
+    API_URL = input("Enter API URL: ").strip()
+    API_TOKEN = input("Enter API Token: ").strip()
+    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
+    AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
+
+    HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
+
+    grouped_data = {}
+    for metric_name, metric_selector in metrics.items
