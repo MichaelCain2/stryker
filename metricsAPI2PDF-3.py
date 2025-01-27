@@ -73,20 +73,19 @@ def create_title_block(c, management_zone, report_time, start_time, duration, nu
     text_style = styles['Normal']
 
     title_block = [
-        Paragraph(f"<b>Team Name/Management Zone:</b> {management_zone}", text_style),
-        Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
-        Paragraph(f"<b>Report Duration:</b> {start_time}", text_style),
-        Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
-        Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
-        Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
-        Spacer(1, 24)
+        f"Team Name/Management Zone: {management_zone}",
+        f"Report Time: {report_time}",
+        f"Report Duration: {start_time}",
+        f"Data Aggregation: {duration}",
+        f"Number of Servers: {num_servers}",
+        f"Resources: {', '.join(metrics)}"
     ]
 
     y_position = 750
-    for element in title_block:
-        text = element.getPlainText()
-        c.drawString(50, y_position, text)
-        y_position -= 20
+    c.setFont("Helvetica", 12)
+    for line in title_block:
+        c.drawString(50, y_position, line)
+        y_position -= 20  # Adjust spacing
 
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
