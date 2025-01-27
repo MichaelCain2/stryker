@@ -40,23 +40,35 @@ def parse_data(raw_data):
     """
     grouped_data = {}
     try:
+        # Log the raw data structure for debugging
+        logging.debug(f"Raw data structure: {raw_data}")
+
+        # Iterate through the data
         for data in raw_data['result'][0]['data']:
-            host_name = data['dimensionMap'].get('hostName', 'Unknown')
+            host_name = data.get('dimensionMap', {}).get('hostName', 'Unknown')
+            metric_id = raw_data['result'][0]['metricId']
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
+
+            # Ensure timestamps and values are recorded, even if values are empty
+            if not timestamps:
+                logging.warning(f"No 'timestamps' found for metric {metric_id} on host {host_name}")
+            if not values:
+                logging.warning(f"No 'values' found for metric {metric_id} on host {host_name}")
 
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
 
             # Store timestamps and values under the metric name
-            metric_id = raw_data['result'][0]['metricId']
-            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values}
+            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
 
         logging.debug(f"Grouped data: {grouped_data}")
         return grouped_data
+
     except Exception as e:
         logging.error(f"Error parsing data: {e}")
         raise ValueError("Unexpected data structure in API response.")
+
 def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric.
@@ -84,24 +96,14 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     # Title Block
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    start_time = agg_time
-    duration = "Custom Aggregation Period"
-    num_servers = len(grouped_data)
-
-    y_position = height - 50
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y_position, f"Team Name/Management Zone: {management_zone}")
-    y_position -= 20
-    c.drawString(50, y_position, f"Report Time: {report_time}")
-    y_position -= 20
-    c.drawString(50, y_position, f"Report Duration: {start_time}")
-    y_position -= 20
-    c.drawString(50, y_position, f"Data Aggregation: {duration}")
-    y_position -= 20
-    c.drawString(50, y_position, f"Number of Servers: {num_servers}")
-    y_position -= 40
+    c.drawString(50, height - 50, f"Team Name/Management Zone: {management_zone}")
+    c.drawString(50, height - 70, f"Report Time: {report_time}")
+    c.drawString(50, height - 90, f"Aggregation Period: {agg_time}")
 
-    # Host-Specific Sections
+    y_position = height - 130
+
+    # Process each host
     for host_name, metrics_data in grouped_data.items():
         if y_position < 150:
             c.showPage()
@@ -112,22 +114,32 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         y_position -= 30
 
         for metric_name, data in metrics_data.items():
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
+            if not timestamps or not values:
+                logging.warning(f"No data for metric {metric_name} on host {host_name}")
+                continue
+
             c.setFont("Helvetica-Bold", 12)
             c.drawString(50, y_position, f"Metric: {metric_name}")
             y_position -= 20
 
             # Generate and insert the chart
-            graph = generate_graph(data['timestamps'], data['values'], metric_name)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
-                temp_image.write(graph.getvalue())
-                temp_image_path = temp_image.name
+            try:
+                graph = generate_graph(timestamps, values, metric_name)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
+                    temp_image.write(graph.getvalue())
+                    temp_image_path = temp_image.name
 
-            c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
-            y_position -= 180
+                c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
+                y_position -= 180
 
-            if y_position < 150:
-                c.showPage()
-                y_position = height - 50
+                if y_position < 150:
+                    c.showPage()
+                    y_position = height - 50
+            except Exception as e:
+                logging.error(f"Error generating graph for {metric_name} on host {host_name}: {e}")
+                continue
 
     # Save PDF
     c.save()
