@@ -16,7 +16,7 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     """
     Fetch metrics from the Dynatrace API.
     """
-    query_url = f"{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type(HOST)&mzSelector=mzName(\"{mz_selector}\")"
+    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}")'
     logging.debug(f"Fetching metrics with URL: {query_url}")
     response = requests.get(query_url, headers=headers)
     response.raise_for_status()
