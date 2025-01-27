@@ -1,5 +1,4 @@
 import requests
-import pandas as pd
 import matplotlib.pyplot as plt
 from io import BytesIO
 from reportlab.pdfgen import canvas
@@ -43,12 +42,13 @@ def parse_data(raw_data):
     try:
         for data in raw_data['result'][0]['data']:
             host_name = data['dimensionMap'].get('hostName', 'Unknown')
+            metric_id = raw_data['result'][0]['metricId']
             timestamps = data['timestamps']
             values = data['values']
 
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
-            grouped_data[host_name] = {"timestamps": timestamps, "values": values}
+            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values}
 
         logging.debug(f"Grouped data: {grouped_data}")
         return grouped_data
@@ -84,7 +84,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     # Title Block
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     start_time = agg_time
-    duration = "Custom Aggregation Period"  # Example; adjust based on agg_time
+    duration = "Custom Aggregation Period"
     num_servers = len(grouped_data)
 
     y_position = height - 50
