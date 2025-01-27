@@ -83,6 +83,10 @@ def parse_data(raw_data, api_url, headers):
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
+            if not timestamps or not values:
+                logging.warning(f"Missing data for metric '{metric_id}' on host '{host_name}': Timestamps: {timestamps}, Values: {values}")
+                continue
+
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
 
@@ -99,19 +103,32 @@ def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric.
     """
-    plt.figure(figsize=(8, 4))
-    plt.plot(timestamps, values, label=metric_name, marker='o', color='blue')
-    plt.title(metric_name)
-    plt.xlabel("Time")
-    plt.ylabel("Value")
-    plt.grid(True)
-    plt.legend()
+    try:
+        if not timestamps or not values:
+            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing timestamps or values.")
+            return None
 
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png')
-    buffer.seek(0)
-    plt.close()
-    return buffer
+        if len(timestamps) != len(values):
+            logging.error(f"Mismatch in data lengths for metric '{metric_name}': Timestamps length {len(timestamps)}, Values length {len(values)}.")
+            return None
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(timestamps, values, label=metric_name, marker='o', color='blue')
+        plt.title(metric_name)
+        plt.xlabel("Time")
+        plt.ylabel("Value")
+        plt.grid(True)
+        plt.legend()
+
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png')
+        buffer.seek(0)
+        plt.close()
+        logging.info(f"Graph successfully generated for metric '{metric_name}'.")
+        return buffer
+    except Exception as e:
+        logging.error(f"Error generating graph for metric '{metric_name}': {e}")
+        return None
 
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
@@ -146,17 +163,27 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         for metric_name, data in metrics_data.items():
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
+
+            logging.debug(f"Processing metric '{metric_name}' for host '{host_name}': Timestamps: {timestamps}, Values: {values}")
+
             if not timestamps or not values:
+                logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing data.")
                 continue
 
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(50, y_position, f"Metric: {metric_name}")
-            y_position -= 20
+            if len(timestamps) != len(values):
+                logging.error(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Data length mismatch (Timestamps: {len(timestamps)}, Values: {len(values)}).")
+                continue
 
             graph = generate_graph(timestamps, values, metric_name)
+            if graph is None:
+                logging.warning(f"Graph generation failed for metric '{metric_name}' on host '{host_name}'.")
+                continue
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
                 temp_image.write(graph.getvalue())
                 temp_image_path = temp_image.name
+
+            logging.debug(f"Graph for metric '{metric_name}' on host '{host_name}' saved to temporary file '{temp_image_path}'.")
 
             c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
             y_position -= 180
@@ -175,30 +202,4 @@ def sanitize_filename(filename):
         # Handle specific 'ABC: ABCD_1234' convention
         filename = re.sub(r'\s*:\s*', '_', filename)  # Replace colon and surrounding spaces with _
     # Remove other invalid characters
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    # Strip leading/trailing spaces
-    filename = filename.strip()
-    return filename
-
-if __name__ == "__main__":
-    API_URL = input("Enter API URL: ").strip()
-    API_TOKEN = input("Enter API Token: ").strip()
-    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
-    AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
-
-    HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
-
-    grouped_data = {}
-    for metric_name, metric_selector in metrics.items():
-        raw_data = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
-        parsed_data = parse_data(raw_data, API_URL, HEADERS)
-        for host_name, data in parsed_data.items():
-            if host_name not in grouped_data:
-                grouped_data[host_name] = {}
-            grouped_data[host_name][metric_name] = data
-
-    OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
-    OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)
-    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
-
-    print(f"PDF report generated: {OUTPUT_PDF}")
+    filename = re.sub(r'[<>:"/\\
