@@ -118,11 +118,12 @@ def sanitize_filename(filename):
     """
     return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
-def sanitize_mz_selector(mz_selector):
+def sanitize_mz_for_filename(mz_selector):
     """
-    Remove or replace invalid characters in the Management Zone name.
+    Sanitize the Management Zone name for use in the PDF filename.
+    Replace special characters like colons with spaces.
     """
-    return re.sub(r'[<>:"/\\|?*]', '_', mz_selector)
+    return re.sub(r'[:]', ' ', mz_selector)
 
 def format_friendly_agg_date(agg_date):
     """
@@ -172,8 +173,7 @@ if __name__ == "__main__":
     # Input parameters
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
-    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
-    MZ_SELECTOR = sanitize_mz_selector(MZ_SELECTOR)  # Sanitize Management Zone name
+    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()  # Keep unchanged for query
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1w): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
@@ -192,10 +192,11 @@ if __name__ == "__main__":
             logging.error(f"Failed to process metric '{metric_name}': {e}")
 
     # Format output PDF filename
+    sanitized_mz = sanitize_mz_for_filename(MZ_SELECTOR)  # Sanitize for filename only
     friendly_agg_date = format_friendly_agg_date(AGG_TIME)
     run_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    OUTPUT_PDF = f"{MZ_SELECTOR}-{friendly_agg_date}Dynatrace_Metrics_Report-{run_date}.pdf"
-    OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)  # Sanitize the filename
+    OUTPUT_PDF = f"{sanitized_mz}-{friendly_agg_date}Dynatrace_Metrics_Report-{run_date}.pdf"
+    OUTPUT_PDF = sanitize_filename(OUTPUT_PDF)  # Final sanitization
 
     # Create PDF
     create_pdf(host_data, output_pdf=OUTPUT_PDF)
