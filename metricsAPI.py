@@ -83,10 +83,6 @@ def parse_data(raw_data, api_url, headers):
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
-            if not timestamps or not values:
-                logging.warning(f"Missing data for metric '{metric_id}' on host '{host_name}': Timestamps: {timestamps}, Values: {values}")
-                continue
-
             if host_name not in grouped_data:
                 grouped_data[host_name] = {}
 
@@ -104,12 +100,8 @@ def generate_graph(timestamps, values, metric_name):
     Generate a graph for the given metric.
     """
     try:
-        if not timestamps or not values:
-            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing timestamps or values.")
-            return None
-
-        if len(timestamps) != len(values):
-            logging.error(f"Mismatch in data lengths for metric '{metric_name}': Timestamps length {len(timestamps)}, Values length {len(values)}.")
+        if not timestamps or all(v is None for v in values):
+            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")
             return None
 
         plt.figure(figsize=(8, 4))
@@ -167,12 +159,8 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
             logging.debug(f"Metric '{metric_name}' for host '{host_name}': Timestamps: {timestamps}, Values: {values}")
 
-            if not timestamps or not values:
-                logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing data.")
-                continue
-
-            if len(timestamps) != len(values):
-                logging.error(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Data length mismatch (Timestamps: {len(timestamps)}, Values: {len(values)}).")
+            if not timestamps or all(v is None for v in values):
+                logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing or invalid data.")
                 continue
 
             graph = generate_graph(timestamps, values, metric_name)
