@@ -86,7 +86,6 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     start_time = agg_time
     duration = "Custom Aggregation Period"  # Example; adjust based on agg_time
     num_servers = len(grouped_data)
-    metrics_list = list(metrics.keys())
 
     y_position = height - 50
     c.setFont("Helvetica-Bold", 14)
@@ -99,12 +98,10 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c.drawString(50, y_position, f"Data Aggregation: {duration}")
     y_position -= 20
     c.drawString(50, y_position, f"Number of Servers: {num_servers}")
-    y_position -= 20
-    c.drawString(50, y_position, f"Resources: {', '.join(metrics_list)}")
     y_position -= 40
 
     # Host-Specific Sections
-    for host_name, host_data in grouped_data.items():
+    for host_name, metrics_data in grouped_data.items():
         if y_position < 150:
             c.showPage()
             y_position = height - 50
@@ -113,7 +110,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         c.drawString(50, y_position, f"Host: {host_name}")
         y_position -= 30
 
-        for metric_name, data in host_data.items():
+        for metric_name, data in metrics_data.items():
             c.setFont("Helvetica-Bold", 12)
             c.drawString(50, y_position, f"Metric: {metric_name}")
             y_position -= 20
