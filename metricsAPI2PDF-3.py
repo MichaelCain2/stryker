@@ -23,26 +23,34 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
     logging.debug(f"API response: {response.json()}")
     return response.json()
 
-def parse_data(raw_data):
+ddef parse_data(raw_data):
     """
-    Parse the raw data to extract 'time', 'value', and 'entityId'. Handles missing keys gracefully.
+    Parse the raw data to extract 'timestamps', 'values', and 'entityId' from dimensionMap.
     """
     try:
         result = []
         for data in raw_data['result'][0]['data']:
-            for point in data['dimensions']:
-                result.append({
-                    "entityId": point[0],  # Assuming entityId is the first dimension
-                    "time": point.get("time", "Unknown"),
-                    "value": point.get("value", None)
-                })
+            # Ensure data contains dimensionMap, timestamps, and values
+            if isinstance(data, dict) and 'dimensionMap' in data and 'timestamps' in data and 'values' in data:
+                entity_id = data['dimensionMap'].get('entityId', 'Unknown')
+                timestamps = data['timestamps']
+                values = data['values']
+
+                # Pair each timestamp with its corresponding value
+                for timestamp, value in zip(timestamps, values):
+                    result.append({
+                        "entityId": entity_id,
+                        "time": timestamp,
+                        "value": value
+                    })
+            else:
+                logging.warning(f"Unexpected data structure: {data}")
         logging.debug(f"Parsed data: {result}")
         return pd.DataFrame(result)
-    except (KeyError, IndexError) as e:
+    except (KeyError, IndexError, AttributeError, TypeError) as e:
         logging.error(f"Error parsing data: {e}")
         logging.debug(f"Raw data structure: {raw_data}")
         raise ValueError("Unexpected data structure in API response.")
-
 def generate_graph(data, thresholds, title="Metrics Report"):
     """
     Generate a graph with line and scatter plots and threshold lines.
