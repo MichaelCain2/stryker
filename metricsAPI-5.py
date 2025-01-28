@@ -142,6 +142,9 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     y_position = height - 150
 
+    # Debug full grouped_data structure
+    logging.debug(f"Grouped data passed to create_pdf: {grouped_data}")
+
     # Host-Specific Sections
     for host_name, metrics_data in grouped_data.items():
         logging.debug(f"Processing host: {host_name}")
@@ -157,6 +160,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
+            # Debugging data for each metric
             logging.debug(f"Metric '{metric_name}' for host '{host_name}': Timestamps: {timestamps}, Values: {values}")
 
             if not timestamps or all(v is None for v in values):
