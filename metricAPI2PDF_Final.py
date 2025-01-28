@@ -25,11 +25,12 @@ metrics = {
     "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
 
-def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
+def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     """
     Fetch metrics from the Dynatrace API.
     """
-    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}")'
+    resolution_param = f"&resolution={resolution}" if resolution else ""
+    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}"){resolution_param}'
     logging.debug(f"Fetching metrics with URL: {query_url}")
     response = requests.get(query_url, headers=headers)
     response.raise_for_status()
@@ -96,11 +97,8 @@ def generate_graph(timestamps, values, metric_name, breakdown_interval):
         # Convert timestamps to human-readable datetime
         datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
 
-        # Aggregate data based on breakdown interval (e.g., 1m, 5m)
-        aggregated_timestamps, aggregated_values = aggregate_data(datetime_timestamps, values, breakdown_interval)
-
         plt.figure(figsize=(8, 4))
-        plt.plot(aggregated_timestamps, aggregated_values, label=metric_name, marker='o', color='blue')
+        plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("Time")
         plt.ylabel("Value")
@@ -121,13 +119,6 @@ def generate_graph(timestamps, values, metric_name, breakdown_interval):
     except Exception as e:
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
-
-def aggregate_data(timestamps, values, breakdown_interval):
-    """
-    Aggregate data based on the specified breakdown interval.
-    """
-    # Placeholder for aggregation logic, e.g., rounding timestamps to nearest interval
-    return timestamps, values
 
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf, breakdown_interval):
     """
@@ -204,6 +195,7 @@ if __name__ == "__main__":
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1m, now-5m, now-1h, now-1d): ").strip()
+    RESOLUTION = input("Enter Resolution (e.g., 1m, 5m, 1h, 1d, or leave blank for default): ").strip()
     BREAKDOWN_INTERVAL = input("How do you want to break down the data chunks by time? (e.g., 1m, 5m, 1h, 1d): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
@@ -211,7 +203,7 @@ if __name__ == "__main__":
     # Fetch and group data
     raw_data = {}
     for metric_name, metric_selector in metrics.items():
-        raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME)
+        raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
 
     grouped_data = group_data(raw_data, API_URL, HEADERS)
 
