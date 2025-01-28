@@ -97,7 +97,7 @@ def generate_graph(timestamps, values, metric_name):
         # Convert timestamps to human-readable datetime
         datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
 
-        plt.figure(figsize=(8, 4))
+        plt.figure(figsize=(8, 3.5))  # Adjust chart height
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("Time")
@@ -127,8 +127,8 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c = canvas.Canvas(output_pdf, pagesize=letter)
     width, height = letter
     margin = 50
-    chart_height = 150  # Height of each chart
-    chart_spacing = 30  # Spacing between charts
+    chart_height = 120  # Reduce chart height
+    chart_spacing = 20  # Reduce spacing between charts
     y_position = height - margin
 
     def start_new_page():
