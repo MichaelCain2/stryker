@@ -192,4 +192,7 @@ if __name__ == "__main__":
     grouped_data = group_data(raw_data, API_URL, HEADERS)
     grouped_data = normalize_processor_data(grouped_data, host_details)
 
-    OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H
+    OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
+    create_pdf(grouped_data, host_details, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+
+    print(f"PDF report generated: {OUTPUT_PDF}")
