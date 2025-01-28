@@ -135,12 +135,9 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         nonlocal y_position
         c.showPage()
         y_position = height - margin
-        # Optional: Add header on each page
-        c.setFont("Helvetica-Bold", 14)
+        # Repeated header for each page
+        c.setFont("Helvetica-Bold", 12)
         c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
-        c.drawString(margin, height - 70, f"Report Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        c.drawString(margin, height - 90, f"Aggregation Period: {agg_time}")
-        c.drawString(margin, height - 110, f"Number of Hosts: {len(grouped_data)}")
 
     # Add initial header
     c.setFont("Helvetica-Bold", 14)
@@ -155,8 +152,9 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         # Start each host on a new page
         start_new_page()
 
-        # Add host name as a distinct section header
+        # Add host name with separation
         c.setFont("Helvetica-Bold", 14)
+        y_position -= 20  # Additional separation
         c.drawString(margin, y_position, f"Host: {host_name}")
         y_position -= 30
 
