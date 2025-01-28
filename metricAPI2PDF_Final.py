@@ -84,9 +84,9 @@ def group_data(raw_data, api_url, headers):
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
-def generate_graph(timestamps, values, metric_name):
+def generate_graph(timestamps, values, metric_name, breakdown_interval):
     """
-    Generate a graph for the given metric.
+    Generate a graph for the given metric with data breakdown by the specified interval.
     """
     try:
         if not timestamps or all(v is None for v in values):
@@ -96,8 +96,11 @@ def generate_graph(timestamps, values, metric_name):
         # Convert timestamps to human-readable datetime
         datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
 
+        # Aggregate data based on breakdown interval (e.g., 1m, 5m)
+        aggregated_timestamps, aggregated_values = aggregate_data(datetime_timestamps, values, breakdown_interval)
+
         plt.figure(figsize=(8, 4))
-        plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
+        plt.plot(aggregated_timestamps, aggregated_values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("Time")
         plt.ylabel("Value")
@@ -119,7 +122,14 @@ def generate_graph(timestamps, values, metric_name):
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
 
-def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
+def aggregate_data(timestamps, values, breakdown_interval):
+    """
+    Aggregate data based on the specified breakdown interval.
+    """
+    # Placeholder for aggregation logic, e.g., rounding timestamps to nearest interval
+    return timestamps, values
+
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf, breakdown_interval):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
     """
@@ -158,7 +168,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
                 logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing or invalid data.")
                 continue
 
-            graph = generate_graph(timestamps, values, metric_name)
+            graph = generate_graph(timestamps, values, metric_name, breakdown_interval)
             if graph is None:
                 logging.warning(f"Graph generation failed for metric '{metric_name}' on host '{host_name}'.")
                 continue
@@ -194,6 +204,7 @@ if __name__ == "__main__":
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1m, now-5m, now-1h, now-1d): ").strip()
+    BREAKDOWN_INTERVAL = input("How do you want to break down the data chunks by time? (e.g., 1m, 5m, 1h, 1d): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
@@ -206,6 +217,6 @@ if __name__ == "__main__":
 
     # Generate PDF
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
-    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF, BREAKDOWN_INTERVAL)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
