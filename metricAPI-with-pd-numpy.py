@@ -1,5 +1,6 @@
-import requests
+mport requests
 import matplotlib.pyplot as plt
+from matplotlib.dates import DateFormatter, date2num
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -92,13 +93,21 @@ def generate_graph(timestamps, values, metric_name):
             logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")
             return None
 
+        # Convert timestamps to human-readable datetime
+        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
+
         plt.figure(figsize=(8, 4))
-        plt.plot(timestamps, values, label=metric_name, marker='o', color='blue')
+        plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("Time")
         plt.ylabel("Value")
         plt.grid(True)
         plt.legend()
+
+        # Format x-axis for better readability
+        ax = plt.gca()
+        ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
+        plt.xticks(rotation=45)
 
         buffer = BytesIO()
         plt.savefig(buffer, format='png')
