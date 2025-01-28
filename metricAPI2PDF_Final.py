@@ -85,9 +85,9 @@ def group_data(raw_data, api_url, headers):
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
-def generate_graph(timestamps, values, metric_name, breakdown_interval):
+def generate_graph(timestamps, values, metric_name):
     """
-    Generate a graph for the given metric with data breakdown by the specified interval.
+    Generate a graph for the given metric.
     """
     try:
         if not timestamps or all(v is None for v in values):
@@ -120,7 +120,7 @@ def generate_graph(timestamps, values, metric_name, breakdown_interval):
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
 
-def create_pdf(grouped_data, management_zone, agg_time, output_pdf, breakdown_interval):
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
     """
@@ -159,7 +159,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf, breakdown_in
                 logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}': Missing or invalid data.")
                 continue
 
-            graph = generate_graph(timestamps, values, metric_name, breakdown_interval)
+            graph = generate_graph(timestamps, values, metric_name)
             if graph is None:
                 logging.warning(f"Graph generation failed for metric '{metric_name}' on host '{host_name}'.")
                 continue
@@ -196,7 +196,6 @@ if __name__ == "__main__":
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
     AGG_TIME = input("Enter Aggregation Time (e.g., now-1m, now-5m, now-1h, now-1d): ").strip()
     RESOLUTION = input("Enter Resolution (e.g., 1m, 5m, 1h, 1d, or leave blank for default): ").strip()
-    BREAKDOWN_INTERVAL = input("How do you want to break down the data chunks by time? (e.g., 1m, 5m, 1h, 1d): ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
@@ -209,6 +208,6 @@ if __name__ == "__main__":
 
     # Generate PDF
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
-    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF, BREAKDOWN_INTERVAL)
+    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
