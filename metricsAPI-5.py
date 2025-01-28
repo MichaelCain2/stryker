@@ -78,18 +78,20 @@ def parse_data(raw_data, api_url, headers):
             if host_id not in host_name_cache:
                 host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
 
-            host_name = host_name_cache.get(host_id, host_id)
+            resolved_name = host_name_cache.get(host_id, host_id)
             metric_id = raw_data['result'][0]['metricId']
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
-            if host_name not in grouped_data:
-                grouped_data[host_name] = {}
+            if host_id not in grouped_data:
+                grouped_data[host_id] = {}
 
-            grouped_data[host_name][metric_id] = {"timestamps": timestamps, "values": values or [None] * len(timestamps)}
+            grouped_data[host_id][metric_id] = {"timestamps": timestamps, "values": values}
 
-        logging.debug(f"Grouped Data: {grouped_data}")
-        return grouped_data
+        # Replace host IDs with resolved names in grouped_data
+        resolved_grouped_data = {host_name_cache.get(host_id, host_id): metrics for host_id, metrics in grouped_data.items()}
+        logging.debug(f"Grouped Data after resolving host names: {resolved_grouped_data}")
+        return resolved_grouped_data
 
     except Exception as e:
         logging.error(f"Error parsing data: {e}")
