@@ -134,6 +134,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             c.showPage()
             y_position = height - 50
 
+        # Add host name as a distinct section header
         c.setFont("Helvetica-Bold", 14)
         c.drawString(50, y_position, f"Host: {host_name}")
         y_position -= 30
@@ -159,12 +160,13 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
             logging.debug(f"Graph for metric '{metric_name}' on host '{host_name}' saved to temporary file '{temp_image_path}'.")
 
-            c.drawImage(temp_image_path, 50, y_position, width=450, height=150)
-            y_position -= 180
-
-            if y_position < 150:
+            # Check y_position and add page breaks if necessary
+            if y_position < 200:
                 c.showPage()
                 y_position = height - 50
+
+            c.drawImage(temp_image_path, 50, y_position - 150, width=450, height=150)
+            y_position -= 180
 
     c.save()
 
