@@ -126,27 +126,38 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     c = canvas.Canvas(output_pdf, pagesize=letter)
     width, height = letter
+    margin = 50
+    chart_height = 150  # Height of each chart
+    chart_spacing = 30  # Spacing between charts
+    y_position = height - margin
 
-    # Title Block
-    report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    def start_new_page():
+        nonlocal y_position
+        c.showPage()
+        y_position = height - margin
+        # Optional: Add header on each page
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
+        c.drawString(margin, height - 70, f"Report Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        c.drawString(margin, height - 90, f"Aggregation Period: {agg_time}")
+        c.drawString(margin, height - 110, f"Number of Hosts: {len(grouped_data)}")
+
+    # Add initial header
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, height - 50, f"Team Name/Management Zone: {management_zone}")
-    c.drawString(50, height - 70, f"Report Time: {report_time}")
-    c.drawString(50, height - 90, f"Aggregation Period: {agg_time}")
-    c.drawString(50, height - 110, f"Number of Hosts: {len(grouped_data)}")
-
-    y_position = height - 150
+    c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
+    c.drawString(margin, height - 70, f"Report Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(margin, height - 90, f"Aggregation Period: {agg_time}")
+    c.drawString(margin, height - 110, f"Number of Hosts: {len(grouped_data)}")
+    y_position -= 150  # Adjust for header space
 
     # Host-Specific Sections
     for host_name, metrics_data in grouped_data.items():
-        logging.debug(f"Processing host: {host_name}")
-        if y_position < 150:
-            c.showPage()
-            y_position = height - 50
+        # Start each host on a new page
+        start_new_page()
 
         # Add host name as a distinct section header
         c.setFont("Helvetica-Bold", 14)
-        c.drawString(50, y_position, f"Host: {host_name}")
+        c.drawString(margin, y_position, f"Host: {host_name}")
         y_position -= 30
 
         for metric_name, data in metrics_data.items():
@@ -170,13 +181,12 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
             logging.debug(f"Graph for metric '{metric_name}' on host '{host_name}' saved to temporary file '{temp_image_path}'.")
 
-            # Check y_position and add page breaks if necessary
-            if y_position < 200:
-                c.showPage()
-                y_position = height - 50
+            # Check if there's enough space for the chart; if not, add a new page
+            if y_position - chart_height - chart_spacing < margin:
+                start_new_page()
 
-            c.drawImage(temp_image_path, 50, y_position - 150, width=450, height=150)
-            y_position -= 180
+            c.drawImage(temp_image_path, margin, y_position - chart_height, width=450, height=chart_height)
+            y_position -= (chart_height + chart_spacing)
 
     c.save()
 
