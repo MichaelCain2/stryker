@@ -1,0 +1,35 @@
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
+    """
+    Create a PDF report organized by host, embedding the graphs for each metric.
+    """
+    c = canvas.Canvas(output_pdf, pagesize=letter)
+    width, height = letter
+    margin = 50
+    chart_height = 120  # Adjust chart height
+    chart_spacing = 20  # Adjust spacing between charts
+    y_position = height - margin
+
+    # Generate the title block
+    report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    duration = "Weekly" if "1w" in agg_time else "Daily" if "1d" in agg_time else "Custom"
+    num_servers = len(grouped_data)
+    title_block = [
+        Paragraph(f"<b>Team Name/Management Zone:</b> {management_zone}", text_style),
+        Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
+        Paragraph(f"<b>Report Duration:</b> {agg_time}", text_style),
+        Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
+        Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
+        Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
+        Spacer(1, 24)
+    ]
+
+    # Add the title block to the first page
+    y_position -= 150  # Adjust for header space
+    for element in title_block:
+        y_position -= 20  # Spacing between each element
+        c.setFont("Helvetica", 12)
+        c.drawString(margin, y_position, element.getPlainText() if isinstance(element, Paragraph) else str(element))
+    
+    # Host-Specific Sections
+    for host_name, metrics_data in grouped_data.items():
+        ...
