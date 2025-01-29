@@ -41,11 +41,16 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     duration = "Weekly" if "1w" in agg_time else "Daily" if "1d" in agg_time else "Custom"
     num_servers = len(grouped_data)
+    
     title_block = [
         Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
+        Spacer(1, 10),
         Paragraph(f"<b>Report Duration:</b> {agg_time}", text_style),
+        Spacer(1, 10),
         Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
+        Spacer(1, 10),
         Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
+        Spacer(1, 10),
         Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
         Spacer(1, 24)
     ]
@@ -59,6 +64,32 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         elif isinstance(element, Spacer):
             y_position -= element.height
     
+    # Continue with existing logic for host data and metrics
+    for host_name, metrics_data in grouped_data.items():
+        c.showPage()
+        y_position = height - margin  # Reset y_position for new page
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(margin, y_position, f"Host: {host_name}")
+        y_position -= 30
+
+        for metric_name, data in metrics_data.items():
+            timestamps = data.get('timestamps', [])
+            values = data.get('values', [])
+
+            if not timestamps or all(v is None for v in values):
+                continue
+
+            graph = generate_graph(timestamps, values, metric_name)
+            if graph is None:
+                continue
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
+                temp_image.write(graph.getvalue())
+                temp_image_path = temp_image.name
+
+            c.drawImage(temp_image_path, margin, y_position - 120, width=450, height=120)
+            y_position -= 140
+    
     c.save()
 
 if __name__ == "__main__":
@@ -71,8 +102,12 @@ if __name__ == "__main__":
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
     # Fetch and group data (Placeholder for real implementation)
-    grouped_data = {}  # This should be replaced with actual data fetching logic
-
+    raw_data = {}
+    for metric_name, metric_selector in metrics.items():
+        raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
+    
+    grouped_data = group_data(raw_data, API_URL, HEADERS)
+    
     OUTPUT_PDF = f"{MZ_SELECTOR.replace(':', '_')}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
 
