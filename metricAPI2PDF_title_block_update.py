@@ -27,6 +27,17 @@ metrics = {
     "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
 
+def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
+    """
+    Fetch metrics from the Dynatrace API.
+    """
+    resolution_param = f"&resolution={resolution}" if resolution else ""
+    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}"){resolution_param}'
+    logging.debug(f"Fetching metrics with URL: {query_url}")
+    response = requests.get(query_url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
@@ -101,7 +112,7 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    # Fetch and group data (Placeholder for real implementation)
+    # Fetch and group data
     raw_data = {}
     for metric_name, metric_selector in metrics.items():
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
