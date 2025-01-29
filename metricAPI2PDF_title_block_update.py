@@ -38,6 +38,38 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     response.raise_for_status()
     return response.json()
 
+def group_data(raw_data, api_url, headers):
+    """
+    Group metrics data by resolved host names and metrics.
+    """
+    grouped_data = {}
+    host_name_cache = {}
+
+    for metric_name, metric_data in raw_data.items():
+        for data_point in metric_data.get('result', [])[0].get('data', []):
+            # Extract host ID
+            host_id = data_point.get('dimensions', [None])[0]
+            if not host_id:
+                logging.warning(f"Missing host ID in data point: {data_point}")
+                continue
+
+            # Resolve host name if not already cached
+            if host_id not in host_name_cache:
+                host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+
+            resolved_name = host_name_cache.get(host_id, host_id)
+            timestamps = data_point.get('timestamps', [])
+            values = data_point.get('values', [])
+
+            # Organize data by host and metric
+            if resolved_name not in grouped_data:
+                grouped_data[resolved_name] = {}
+
+            grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
+
+    logging.debug(f"Grouped Data: {grouped_data}")
+    return grouped_data
+
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
@@ -74,32 +106,6 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             y_position -= 20  # Adjust spacing
         elif isinstance(element, Spacer):
             y_position -= element.height
-    
-    # Continue with existing logic for host data and metrics
-    for host_name, metrics_data in grouped_data.items():
-        c.showPage()
-        y_position = height - margin  # Reset y_position for new page
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(margin, y_position, f"Host: {host_name}")
-        y_position -= 30
-
-        for metric_name, data in metrics_data.items():
-            timestamps = data.get('timestamps', [])
-            values = data.get('values', [])
-
-            if not timestamps or all(v is None for v in values):
-                continue
-
-            graph = generate_graph(timestamps, values, metric_name)
-            if graph is None:
-                continue
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
-                temp_image.write(graph.getvalue())
-                temp_image_path = temp_image.name
-
-            c.drawImage(temp_image_path, margin, y_position - 120, width=450, height=120)
-            y_position -= 140
     
     c.save()
 
