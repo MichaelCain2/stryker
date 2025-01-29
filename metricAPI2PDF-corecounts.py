@@ -8,6 +8,7 @@ from datetime import datetime
 import logging
 import tempfile
 import re
+import matplotlib.dates as mdates
 
 # Configure logging
 log_filename = f"MetricAPI2PDF_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -45,7 +46,7 @@ def group_data(raw_data):
     for metric_name, metric_data in raw_data.items():
         for data_point in metric_data.get('result', [])[0].get('data', []):
             host_id = data_point.get('dimensions', [None])[0]
-            timestamps = data_point.get('timestamps', [])
+            timestamps = [datetime.utcfromtimestamp(ts / 1000) for ts in data_point.get('timestamps', [])]
             values = data_point.get('values', [])
 
             # Adjust values based on metric type
@@ -74,7 +75,7 @@ def group_data(raw_data):
 
 def generate_graph(timestamps, values, metric_name, host_name):
     """
-    Generate a graph for the given metric.
+    Generate a graph for the given metric with human-readable timestamps.
     """
     plt.figure(figsize=(8, 3.5))
     plt.plot(timestamps, values, label=f"{metric_name}", marker='o', color='blue')
@@ -83,6 +84,8 @@ def generate_graph(timestamps, values, metric_name, host_name):
     plt.ylabel("Value")
     plt.grid(True)
     plt.legend()
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))  # Human-readable time format
+    plt.xticks(rotation=45)
 
     buffer = BytesIO()
     plt.savefig(buffer, format='png')
@@ -107,6 +110,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         y_position = height - margin
         c.setFont("Helvetica-Bold", 12)
         c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
+        y_position -= 20  # Add extra space between the header and the hostname
 
     c.setFont("Helvetica-Bold", 14)
     c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
@@ -118,7 +122,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         start_new_page()
         c.setFont("Helvetica-Bold", 14)
         c.drawString(margin, y_position, f"Host: {host_id}")
-        y_position -= 30
+        y_position -= 40  # Increase spacing to avoid merging of text
 
         for metric_name, data in metrics_data.items():
             timestamps = data.get('timestamps', [])
@@ -140,16 +144,6 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             y_position -= (chart_height + chart_spacing)
 
     c.save()
-
-def sanitize_filename(filename):
-    """
-    Sanitize the filename by replacing specific patterns while preserving other conventions.
-    """
-    if ':' in filename:
-        filename = re.sub(r'\s*:\s*', '_', filename)
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    filename = filename.strip()
-    return filename
 
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
