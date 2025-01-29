@@ -10,35 +10,20 @@ import tempfile
 import re
 
 # Configure logging
-log_filename = f"MetricAPI2PDF-corecount_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_filename = f"MetricAPI2PDF_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Metrics definition
+# Full metrics definition (restored)
 metrics = {
     "Processor": "builtin:host.cpu.usage",
     "Memory": "builtin:host.mem.usage",
     "Average Disk Used Percentage": "builtin:host.disk.usedPct",
-    "Network Traffic In": "builtin:host.net.nic.trafficIn",
-    "Network Traffic Out": "builtin:host.net.nic.trafficOut"
+    "Average Disk Utilization Time": "builtin:host.disk.utilTime",
+    "Disk Write Time Per Second": "builtin:host.disk.writeTime",
+    "Average Disk Queue Length": "builtin:host.disk.queueLength",
+    "Network Adapter In": "builtin:host.net.nic.trafficIn",
+    "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
-
-def fetch_host_details(api_url, headers):
-    """
-    Fetch host details including display name and CPU core count.
-    """
-    url = f"{api_url.split('/metrics/query')[0]}/entities?type=HOST&fields=properties.cpuCores"
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    host_data = response.json()
-
-    host_details = {}
-    for entity in host_data.get("entities", []):
-        host_id = entity["entityId"]
-        display_name = entity.get("displayName", host_id)
-        cpu_cores = entity.get("properties", {}).get("cpuCores", 1)  # Default to 1 if missing
-        host_details[host_id] = {"displayName": display_name, "cpuCores": cpu_cores}
-    
-    return host_details
 
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     """
@@ -51,58 +36,51 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     response.raise_for_status()
     return response.json()
 
-def group_data(raw_data, api_url, headers):
+def group_data(raw_data):
     """
-    Group metrics data by resolved host names and metrics.
+    Group metrics data by resolved host names and metrics, with human-readable value adjustments.
     """
     grouped_data = {}
-    host_name_cache = {}
 
     for metric_name, metric_data in raw_data.items():
         for data_point in metric_data.get('result', [])[0].get('data', []):
             host_id = data_point.get('dimensions', [None])[0]
-            if not host_id:
-                logging.warning(f"Missing host ID in data point: {data_point}")
-                continue
-
-            if host_id not in host_name_cache:
-                host_name_cache[host_id] = fetch_host_details(api_url, headers).get(host_id, {})
-
-            resolved_name = host_name_cache.get(host_id, {}).get("displayName", host_id)
             timestamps = data_point.get('timestamps', [])
             values = data_point.get('values', [])
 
-            if resolved_name not in grouped_data:
-                grouped_data[resolved_name] = {}
+            # Adjust values based on metric type
+            if metric_name == "Processor":
+                values = [v * 100 if v is not None else None for v in values]  # Convert to percentage
 
-            grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
+            elif metric_name == "Memory":
+                values = [v if v is not None else None for v in values]  # Memory is already percentage
+
+            elif metric_name in ["Average Disk Used Percentage", "Average Disk Utilization Time"]:
+                values = [v * 100 if v is not None else None for v in values]  # Convert to percentage
+
+            elif metric_name == "Disk Write Time Per Second":
+                values = [v * 1000 if v is not None else None for v in values]  # Convert seconds to milliseconds
+
+            elif metric_name in ["Network Adapter In", "Network Adapter Out"]:
+                values = [v / 1024 / 1024 if v is not None else None for v in values]  # Convert bytes to MB
+
+            if host_id not in grouped_data:
+                grouped_data[host_id] = {}
+
+            grouped_data[host_id][metric_name] = {"timestamps": timestamps, "values": values}
 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
-def normalize_processor_data(metrics_data, host_details):
-    """
-    Normalize processor data by dividing by the number of cores.
-    """
-    for host_name, metrics in metrics_data.items():
-        cpu_cores = host_details.get(host_name, {}).get("cpuCores", 1)
-        for metric_name, metric_data in metrics.items():
-            if metric_name == "Processor":
-                metric_data["values"] = [
-                    (value / cpu_cores) * 100 if value is not None else None
-                    for value in metric_data["values"]
-                ]
-    return metrics_data
-
-def generate_graph(timestamps, values, metric_name, core_count, host_name):
+def generate_graph(timestamps, values, metric_name, host_name):
     """
     Generate a graph for the given metric.
     """
     plt.figure(figsize=(8, 3.5))
-    plt.plot(timestamps, values, label=f"{metric_name} (Normalized)", marker='o', color='blue')
-    plt.title(f"{metric_name} - {host_name} ({core_count} Cores)")
+    plt.plot(timestamps, values, label=f"{metric_name}", marker='o', color='blue')
+    plt.title(f"{metric_name} - {host_name}")
     plt.xlabel("Time")
-    plt.ylabel("CPU Usage (%)")
+    plt.ylabel("Value")
     plt.grid(True)
     plt.legend()
 
@@ -112,7 +90,7 @@ def generate_graph(timestamps, values, metric_name, core_count, host_name):
     plt.close()
     return buffer
 
-def create_pdf(grouped_data, host_details, management_zone, agg_time, output_pdf):
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report with normalized processor data.
     """
@@ -136,20 +114,19 @@ def create_pdf(grouped_data, host_details, management_zone, agg_time, output_pdf
     c.drawString(margin, height - 90, f"Aggregation Period: {agg_time}")
     y_position -= 150
 
-    for host_name, metrics_data in grouped_data.items():
+    for host_id, metrics_data in grouped_data.items():
         start_new_page()
-        core_count = host_details.get(host_name, {}).get("cpuCores", 1)
         c.setFont("Helvetica-Bold", 14)
-        c.drawString(margin, y_position, f"Host: {host_name} ({core_count} Cores)")
+        c.drawString(margin, y_position, f"Host: {host_id}")
         y_position -= 30
 
         for metric_name, data in metrics_data.items():
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
 
-            graph = generate_graph(timestamps, values, metric_name, core_count, host_name)
+            graph = generate_graph(timestamps, values, metric_name, host_id)
             if graph is None:
-                logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_name}'.")
+                logging.warning(f"Skipping graph for metric '{metric_name}' on host '{host_id}'.")
                 continue
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
@@ -183,16 +160,13 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    host_details = fetch_host_details(API_URL, HEADERS)
-
     raw_data = {}
     for metric_name, metric_selector in metrics.items():
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
 
-    grouped_data = group_data(raw_data, API_URL, HEADERS)
-    grouped_data = normalize_processor_data(grouped_data, host_details)
+    grouped_data = group_data(raw_data)
 
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
-    create_pdf(grouped_data, host_details, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
