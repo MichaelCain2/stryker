@@ -26,6 +26,16 @@ metrics = {
     "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
 
+def sanitize_filename(filename):
+    """
+    Sanitize the filename by replacing specific patterns while preserving other conventions.
+    """
+    if ':' in filename:
+        filename = re.sub(r'\s*:\s*', '_', filename)
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    filename = filename.strip()
+    return filename
+
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     """
     Fetch metrics from the Dynatrace API.
