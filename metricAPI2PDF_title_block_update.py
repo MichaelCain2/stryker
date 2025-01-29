@@ -38,6 +38,54 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     response.raise_for_status()
     return response.json()
 
+def fetch_host_name(api_url, headers, host_id):
+    """
+    Fetch human-readable hostname from the Entities API.
+    """
+    base_url = api_url.split("metrics/query")[0]  # Remove /metrics/query from the base URL
+    url = f"{base_url}/entities/{host_id}"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+        display_name = entity_data.get("displayName", host_id)  # Fallback to host_id if displayName is missing
+        logging.debug(f"Resolved {host_id} to {display_name}")
+        return display_name
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Error fetching display name for {host_id}: {e}")
+        return host_id
+
+def generate_graph(timestamps, values, metric_name):
+    """
+    Generate a graph for the given metric.
+    """
+    try:
+        if not timestamps or all(v is None for v in values):
+            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")
+            return None
+
+        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
+        plt.figure(figsize=(8, 3.5))  # Adjust chart height
+        plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
+        plt.title(metric_name)
+        plt.xlabel("Time")
+        plt.ylabel("Value")
+        plt.grid(True)
+        plt.legend()
+        ax = plt.gca()
+        ax.xaxis.set_major_formatter(DateFormatter("%H:%M:%S"))
+        plt.xticks(rotation=0)
+
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png')
+        buffer.seek(0)
+        plt.close()
+        logging.info(f"Graph successfully generated for metric '{metric_name}'.")
+        return buffer
+    except Exception as e:
+        logging.error(f"Error generating graph for metric '{metric_name}': {e}")
+        return None
+
 def group_data(raw_data, api_url, headers):
     """
     Group metrics data by resolved host names and metrics.
@@ -47,13 +95,11 @@ def group_data(raw_data, api_url, headers):
 
     for metric_name, metric_data in raw_data.items():
         for data_point in metric_data.get('result', [])[0].get('data', []):
-            # Extract host ID
             host_id = data_point.get('dimensions', [None])[0]
             if not host_id:
                 logging.warning(f"Missing host ID in data point: {data_point}")
                 continue
 
-            # Resolve host name if not already cached
             if host_id not in host_name_cache:
                 host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
 
@@ -61,7 +107,6 @@ def group_data(raw_data, api_url, headers):
             timestamps = data_point.get('timestamps', [])
             values = data_point.get('values', [])
 
-            # Organize data by host and metric
             if resolved_name not in grouped_data:
                 grouped_data[resolved_name] = {}
 
@@ -69,45 +114,6 @@ def group_data(raw_data, api_url, headers):
 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
-
-def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
-    """
-    Create a PDF report organized by host, embedding the graphs for each metric.
-    """
-    c = canvas.Canvas(output_pdf, pagesize=letter)
-    width, height = letter
-    margin = 50
-    styles = getSampleStyleSheet()
-    text_style = styles["Normal"]
-    
-    # Generate the updated title block
-    report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    duration = "Weekly" if "1w" in agg_time else "Daily" if "1d" in agg_time else "Custom"
-    num_servers = len(grouped_data)
-    
-    title_block = [
-        Paragraph(f"<b>Report Time:</b> {report_time}", text_style),
-        Spacer(1, 10),
-        Paragraph(f"<b>Report Duration:</b> {agg_time}", text_style),
-        Spacer(1, 10),
-        Paragraph(f"<b>Data Aggregation:</b> {duration}", text_style),
-        Spacer(1, 10),
-        Paragraph(f"<b>Number of Servers:</b> {num_servers}", text_style),
-        Spacer(1, 10),
-        Paragraph(f"<b>Resources:</b> {', '.join(metrics)}", text_style),
-        Spacer(1, 24)
-    ]
-
-    y_position = height - margin - 100  # Adjust for header space
-    for element in title_block:
-        if isinstance(element, Paragraph):
-            element.wrapOn(c, width - 2 * margin, height)
-            element.drawOn(c, margin, y_position)
-            y_position -= 20  # Adjust spacing
-        elif isinstance(element, Spacer):
-            y_position -= element.height
-    
-    c.save()
 
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
@@ -118,7 +124,6 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    # Fetch and group data
     raw_data = {}
     for metric_name, metric_selector in metrics.items():
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
@@ -127,5 +132,4 @@ if __name__ == "__main__":
     
     OUTPUT_PDF = f"{MZ_SELECTOR.replace(':', '_')}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
-
     print(f"PDF report generated: {OUTPUT_PDF}")
