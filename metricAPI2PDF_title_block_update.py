@@ -115,6 +115,20 @@ def group_data(raw_data, api_url, headers):
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
+def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
+    """
+    Create a PDF report organized by host, embedding the graphs for each metric.
+    """
+    c = canvas.Canvas(output_pdf, pagesize=letter)
+    width, height = letter
+    margin = 50
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
+    c.drawString(margin, height - 70, f"Report Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(margin, height - 90, f"Aggregation Period: {agg_time}")
+    c.drawString(margin, height - 110, f"Number of Hosts: {len(grouped_data)}")
+    c.save()
+
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
