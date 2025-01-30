@@ -8,11 +8,11 @@ from datetime import datetime
 import logging
 import tempfile
 import re
-
+ 
 # Configure logging with timestamp in filename
 log_filename = f"MetricAPI2PDF_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-
+ 
 # Metrics definition
 metrics = {
     "Processor": "builtin:host.cpu.usage",
@@ -24,7 +24,7 @@ metrics = {
     "Network Adapter In": "builtin:host.net.nic.trafficIn",
     "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
-
+ 
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     """
     Fetch metrics from the Dynatrace API.
@@ -35,7 +35,7 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     response = requests.get(query_url, headers=headers)
     response.raise_for_status()
     return response.json()
-
+ 
 def fetch_host_name(api_url, headers, host_id):
     """
     Fetch human-readable hostname from the Entities API.
@@ -52,7 +52,7 @@ def fetch_host_name(api_url, headers, host_id):
     except requests.exceptions.RequestException as e:
         logging.warning(f"Error fetching display name for {host_id}: {e}")
         return host_id
-
+ 
 def group_data(raw_data, api_url, headers):
     """
     Group metrics data by resolved host names and metrics.
@@ -81,7 +81,7 @@ def group_data(raw_data, api_url, headers):
 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
-
+ 
 def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric, applying necessary scaling adjustments.
@@ -125,7 +125,7 @@ def generate_graph(timestamps, values, metric_name):
     except Exception as e:
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
-
+ 
 def sanitize_filename(filename):
     """
     Sanitize the filename by replacing specific patterns while preserving other conventions.
@@ -135,7 +135,7 @@ def sanitize_filename(filename):
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)  # Remove invalid characters
     filename = filename.strip()  # Strip leading/trailing spaces
     return filename
-
+ 
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
@@ -201,6 +201,7 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c.save()
 
 if __name__ == "__main__":
+    # Main execution logic
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
