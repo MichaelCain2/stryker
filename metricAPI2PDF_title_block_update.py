@@ -119,6 +119,16 @@ def generate_graph(timestamps, values, metric_name):
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
 
+def sanitize_filename(filename):
+    """
+    Sanitize the filename by replacing specific patterns while preserving other conventions.
+    """
+    if ':' in filename:
+        filename = re.sub(r'\s*:\s*', '_', filename)  # Replace colon and surrounding spaces with _
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)  # Remove invalid characters
+    filename = filename.strip()  # Strip leading/trailing spaces
+    return filename
+
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
@@ -187,17 +197,14 @@ if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
-    AGG_TIME = input("Enter Aggregation Time (e.g., now-1m, now-5m, now-1h, now-1d): ").strip()
-    RESOLUTION = input("Enter Resolution (e.g., 1m, 5m, 1h, 1d, or leave blank for default): ").strip()
+    AGG_TIME = input("Enter Aggregation Time: ").strip()
+    RESOLUTION = input("Enter Resolution: ").strip()
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    raw_data = {}
-    for metric_name, metric_selector in metrics.items():
-        raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
-
+    raw_data = {metric_name: fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION) for metric_name, metric_selector in metrics.items()}
     grouped_data = group_data(raw_data, API_URL, HEADERS)
-    OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
-    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+    OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
 
+    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
     print(f"PDF report generated: {OUTPUT_PDF}")
