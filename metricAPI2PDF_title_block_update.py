@@ -97,14 +97,20 @@ def generate_graph(timestamps, values, metric_name):
         if metric_name == "Processor":
             values = [v * 100 for v in values]  # Convert to percentage (1-6 -> 100-600)
 
-        # Adjusted chart height for better readability
-        plt.figure(figsize=(8, 5))  # Increased height from 4 to 5
+        plt.figure(figsize=(8, 4))  # Original chart dimensions restored
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
         plt.ylabel("Percentage" if metric_name == "Processor" else "")
         plt.grid(True)
-        plt.legend()
+
+        # Adjusted legend size and spacing
+        plt.legend(
+            loc="upper right",
+            fontsize="medium",  # Increased font size
+            borderaxespad=1.5,  # Added padding around the legend box
+            labelspacing=1.0  # Increased spacing between legend entries
+        )
 
         ax = plt.gca()
         ax.xaxis.set_major_formatter(DateFormatter("%H:%M"))
