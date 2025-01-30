@@ -84,7 +84,7 @@ def group_data(raw_data, api_url, headers):
 
 def generate_graph(timestamps, values, metric_name):
     """
-    Generate a graph for the given metric.
+    Generate a graph for the given metric, applying necessary scaling adjustments.
     """
     try:
         if not timestamps or all(v is None for v in values):
@@ -93,11 +93,15 @@ def generate_graph(timestamps, values, metric_name):
 
         datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
 
+        # Apply scaling for Processor metric
+        if metric_name == "Processor":
+            values = [v * 100 for v in values]  # Convert to percentage (1-6 -> 100-600)
+
         plt.figure(figsize=(8, 4))
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
-        plt.ylabel("")
+        plt.ylabel("Percentage" if metric_name == "Processor" else "")
         plt.grid(True)
         plt.legend()
 
@@ -179,16 +183,6 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     c.save()
 
-def sanitize_filename(filename):
-    """
-    Sanitize the filename by replacing specific patterns while preserving other conventions.
-    """
-    if ':' in filename:
-        filename = re.sub(r'\s*:\s*', '_', filename)
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    filename = filename.strip()
-    return filename
-
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
@@ -203,7 +197,7 @@ if __name__ == "__main__":
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
 
     grouped_data = group_data(raw_data, API_URL, HEADERS)
-    OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
+    OUTPUT_PDF = f"{MZ_SELECTOR}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
     create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
 
     print(f"PDF report generated: {OUTPUT_PDF}")
