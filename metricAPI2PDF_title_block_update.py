@@ -97,7 +97,8 @@ def generate_graph(timestamps, values, metric_name):
         if metric_name == "Processor":
             values = [v * 100 for v in values]  # Convert to percentage (1-6 -> 100-600)
 
-        plt.figure(figsize=(8, 4))
+        # Adjusted chart height for better readability
+        plt.figure(figsize=(8, 5))  # Increased height from 4 to 5
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
