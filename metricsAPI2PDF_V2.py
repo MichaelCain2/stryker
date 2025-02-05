@@ -8,11 +8,11 @@ from datetime import datetime #Official TIme Keeper. In case some date/time issu
 import logging #Every good engineer needs logging. And so I included it
 import tempfile #To pull, read, manipulate the datas from where we get them to where they go, this is that temp space
 import re #My "Bounder" Kicks out unwanted characters EX: ABC: BVCX_1234 kicks out that : and puts in an _ in its place
- 
+ 
 # Configure logging with timestamp in filename
 log_filename = f"MetricAPI2PDF_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
- 
+ 
 # Metrics definition that gets pulled via the API. These can be edited to pull mostly any of the 10,000 plus available metrics. Just save yourself a
 # copy and edit. I have another version that asks for these but that is assuming the operator know them and understands the format to insert them.
 # Even I am a little unsure at times so stick with these to start with and adjust as
@@ -29,7 +29,7 @@ metrics = {
 # Here we start defining the things we want to do. If you need me to go into deeper detail fell free and I will go peruse my notes
 # Things to consider. Metric API pull asks a lot of questions in such a way that it can be confusing. Here I tried to keep it simple
 # So as to produce the expected out put. There are many ways to script an outcome. This is just mine based of what our customer asked
- 
+ 
 def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     """
     Fetch metrics from the Dynatrace API.
@@ -65,26 +65,26 @@ def group_data(raw_data, api_url, headers):
     """
     grouped_data = {}
     host_name_cache = {}
- 
+ 
     for metric_name, metric_data in raw_data.items():
         for data_point in metric_data.get('result', [])[0].get('data', []):
             host_id = data_point.get('dimensions', [None])[0]
             if not host_id:
                 logging.warning(f"Missing host ID in data point: {data_point}")
                 continue
- 
+ 
             if host_id not in host_name_cache:
                 host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
- 
+ 
             resolved_name = host_name_cache.get(host_id, host_id)
             timestamps = data_point.get('timestamps', [])
             values = data_point.get('values', [])
- 
+ 
             if resolved_name not in grouped_data:
                 grouped_data[resolved_name] = {}
- 
+ 
             grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
- 
+ 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 # This is the majick part of the journey. Here is starts to use the datas from the hostname part and the groups data part into a chart that can be put into the PDF in a human readable way. I
@@ -98,20 +98,20 @@ def generate_graph(timestamps, values, metric_name):
             logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.") # You will see this in the logs if you look or like
             #I do tail - f the.log but in most cases does not cause issues
             return None
- 
+ 
         datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps] #Clocky stuff
- 
+ 
         # Apply scaling for Processor metric P.S. I might need to adjust some others but stopped here for now
         if metric_name == "Processor":
             values = [v * 100 for v in values]  # Convert to percentage (1-6 -> 100-600)
- 
+ 
         plt.figure(figsize=(8, 4))  # Original chart dimensions restored. This is the chart size on the PDF page. Not to be confused with otther sizes
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
         plt.ylabel("Percentage" if metric_name == "Processor" else "") #Same as above. Might want to adjust others but for now I am happy with current MVP output.
         plt.grid(True) #Turn grid off and on
- 
+ 
         # Adjusted legend size and spacing. This is the little legend window. Still not sure it is useful but sems others in the FAQs are so for now, I left it
         plt.legend(
             loc="upper right",
@@ -119,11 +119,11 @@ def generate_graph(timestamps, values, metric_name):
             borderaxespad=1.5,  # Added padding around the legend box
             labelspacing=1.0  # Increased spacing between legend entries
         )
- 
+ 
         ax = plt.gca() #-adjusting from time to date
         ax.xaxis.set_major_formatter(DateFormatter("%d-%b-%y")) #-adjusting from time to date. Time be like %H:%M and depending on the aggregation time, you may want to adjust tis. For my now-1w timeframe I want date
         plt.xticks(rotation=15) #Adjusting rotation to fit chart in such a way as to still be readable
- 
+ 
         buffer = BytesIO() #Some of that wizardry I am slowly wrapping my head around but am not the SME
         plt.savefig(buffer, format='png') #The charts on the PDF pages are png's
         buffer.seek(0)
@@ -143,7 +143,7 @@ def sanitize_filename(filename):
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)  # Remove invalid characters
     filename = filename.strip()  # Strip leading/trailing spaces
     return filename
- 
+ 
 #THE MAJICK
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
@@ -155,14 +155,14 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     chart_height = 120
     chart_spacing = 15
     y_position = height - margin
- 
+ 
     def start_new_page():
         nonlocal y_position
         c.showPage()
         y_position = height - margin
         c.setFont("Helvetica-Bold", 12)
         c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
- 
+ 
     # Add initial header
     c.setFont("Helvetica-Bold", 12)
     c.drawString(margin, height - 50, f"Team Name/Management Zone: {management_zone}")
@@ -170,14 +170,14 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c.drawString(margin, height - 80, f"Aggregation Period: {agg_time}")
     c.drawString(margin, height - 95, f"Number of Hosts/Servers: {len(grouped_data)}")
     c.drawString(margin, height - 110, "Resources/Metrics:")
- 
+ 
     y_position = height - 130
     for metric_name in metrics.keys():
         c.drawString(margin + 20, y_position, f"- {metric_name}")
         y_position -= 15
- 
+ 
     y_position -= 20
- 
+ 
     # Host-Specific Sections (unchanged)
     for host_name, metrics_data in grouped_data.items():
         start_new_page()
@@ -185,44 +185,44 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
         y_position -= 20
         c.drawString(margin, y_position, f"Host: {host_name}")
         y_position -= 30
- 
+ 
         for metric_name, data in metrics_data.items():
             timestamps = data.get('timestamps', [])
             values = data.get('values', [])
- 
+ 
             if not timestamps or all(v is None for v in values):
                 continue
- 
+ 
             graph = generate_graph(timestamps, values, metric_name)
             if graph is None:
                 continue
- 
+ 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_image:
                 temp_image.write(graph.getvalue())
                 temp_image_path = temp_image.name
- 
+ 
             if y_position - chart_height - chart_spacing < margin:
                 start_new_page()
- 
+ 
             c.drawImage(temp_image_path, margin, y_position - chart_height, width=450, height=chart_height)
             y_position -= (chart_height + chart_spacing)
- 
+ 
     c.save()
- 
+ 
 if __name__ == "__main__":
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
     AGG_TIME = input("Enter Aggregation Time: ").strip()
     RESOLUTION = input("Enter Resolution: ").strip()
- 
+ 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
- 
+ 
     raw_data = {metric_name: fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION) for metric_name, metric_selector in metrics.items()}
     grouped_data = group_data(raw_data, API_URL, HEADERS)
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
- 
+ 
     create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
     print(f"PDF report generated: {OUTPUT_PDF}")
- 
+ 
     #THE END OF THE MAJICK
