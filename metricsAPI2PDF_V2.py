@@ -9,7 +9,7 @@ import logging  # Every good engineer needs logging. And so I included it
 import tempfile  # To pull, read, manipulate the datas from where we get them to where they go, this is that temp space
 import re  # My "Bounder" Kicks out unwanted characters EX: ABC: BVCX_1234 kicks out that : and puts in an _ in its place
 
-# NEW: Import sys and time for progress indicator (built-in modules)
+# NEW: Import sys and time for progress indicator and timing logic
 import sys  # NOTES: Used for outputting progress in the same line.
 import time  # NOTES: Used for timing and ETA calculation.
 
@@ -241,6 +241,9 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c.save()
 
 if __name__ == "__main__":
+    # NEW: Record overall start time for the script.
+    overall_start = time.time()  # NOTES: Overall script timer start.
+
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
     MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
@@ -260,7 +263,21 @@ if __name__ == "__main__":
     grouped_data = group_data(raw_data, API_URL, HEADERS)
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
 
-    create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
-    print(f"PDF report generated: {OUTPUT_PDF}")
+    # NEW: Logic around create_pdf. Only generate PDF if there is grouped data.
+    if grouped_data:
+        print("Starting PDF generation...")  # NOTES: Indicate start of PDF generation.
+        pdf_start_time = time.time()  # NOTES: Start time for PDF generation.
+        create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+        pdf_end_time = time.time()  # NOTES: End time for PDF generation.
+        pdf_generation_time = pdf_end_time - pdf_start_time
+        print(f"PDF generation took: {pdf_generation_time:.2f} seconds")  # NOTES: Print PDF generation time.
+        print(f"PDF report generated: {OUTPUT_PDF}")
+    else:
+        print("No data available to generate PDF.")  # NOTES: Handle the case where no grouped data was returned.
+
+    # NEW: Record overall end time and print total running time.
+    overall_end = time.time()  # NOTES: Overall script timer end.
+    total_running_time = overall_end - overall_start
+    print(f"Total running time: {total_running_time:.2f} seconds")  # NOTES: Display total script running time.
 
     # THE END OF THE MAJICK
