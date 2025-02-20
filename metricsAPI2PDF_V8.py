@@ -4,7 +4,7 @@ from matplotlib.dates import DateFormatter, date2num  # Helps make time stuff re
 from io import BytesIO  # Digital notepad for storing datas
 from reportlab.pdfgen import canvas  # This is the PDF Architect
 from reportlab.lib.pagesizes import letter  # Manages Page Size and specific standards
-from matplotlib.ticker import FormatStrFormatter #Used to work with scientific numbering issues
+from matplotlib.ticker import FormatStrFormatter  # Used to work with scientific numbering issues
 from datetime import datetime  # Official TIme Keeper. In case some date/time issues still need working on, this is the gladiator
 import logging  # Every good engineer needs logging. And so I included it
 import tempfile  # To pull, read, manipulate the datas from where we get them to where they go, this is that temp space
@@ -18,13 +18,12 @@ import time  # NOTES: Used for timing and ETA calculation.
 log_filename = f"MetricAPI2PDF_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Metrics definition that gets pulled via the API. These can be edited to pull mostly any of the 10,000 plus available metrics. Just save yourself a
-# copy and edit. I have another version that asks for these but that is assuming the operator know them and understands the format to insert them.
-# Even I am a little unsure at times so stick with these to start with and adjust as
+# Metrics definition that gets pulled via the API. These can be edited to pull mostly any of the 10,000 plus available metrics.
+# NOTICES: Updated "Average Disk Used Percentage" to split by diskName so that individual disks are returned.
 metrics = {
     "Processor": "builtin:host.cpu.usage",
     "Memory": "builtin:host.mem.usage",
-    "Average Disk Used Percentage": "builtin:host.disk.usedPct",
+    "Average Disk Used Percentage": "builtin:host.disk.usedPct:splitBy(\"diskName\")",  # NOTES: Split by diskName.
     "Average Disk Utilization Time": "builtin:host.disk.utilTime",
     "Disk Write Time Per Second": "builtin:host.disk.writeTime",
     "Average Disk Queue Length": "builtin:host.disk.queueLength",
@@ -32,7 +31,7 @@ metrics = {
     "Network Adapter Out": "builtin:host.net.nic.trafficOut"
 }
 
-#Needed Library for Y Lable as many are different
+# Needed Library for Y Label as many are different
 y_label_map = {
     "Processor": "Percentage across all CPUs",
     "Memory": "Percentage",
@@ -44,7 +43,7 @@ y_label_map = {
     "Network Adapter Out": "MB per sec"
 }
 
-# NEW: Define a progress indicator helper function using only built-in modules. Al and I wanted a timer. Without some additional crazy coding, this is the best I can currently provide
+# NEW: Define a progress indicator helper function using only built-in modules.
 def print_progress(current, total, start_time, prefix='Progress'):
     """
     Prints a progress bar with percentage complete, elapsed time, and estimated time remaining.
@@ -75,7 +74,6 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     return response.json()
 
 # Dynatrace stores entities, like HOST-xxxxxxx so to convert that to hostname1234, we need to get the entity and go query entities API to get the answer.
-# That is what is happening here. Just getting the data. Not yet do the majick
 def fetch_host_name(api_url, headers, host_id):
     """
     Fetch human-readable hostname from the Entities API.
@@ -93,89 +91,103 @@ def fetch_host_name(api_url, headers, host_id):
         logging.warning(f"Error fetching display name for {host_id}: {e}")
         return host_id
 
-# Here is where we take all that data from the API, that comes out in JSON, and turns it in to a usable format for simpler use when creating the charts in the PDF
+# Modified group_data function to handle split results for disk used percentage.
 def group_data(raw_data, api_url, headers):
     """
     Group metrics data by resolved host names and metrics.
+    #NOTES: For "Average Disk Used Percentage", iterate over all result series (each representing an individual disk)
     """
     grouped_data = {}
     host_name_cache = {}
 
     for metric_name, metric_data in raw_data.items():
-        for data_point in metric_data.get('result', [])[0].get('data', []):
-            host_id = data_point.get('dimensions', [None])[0]
-            if not host_id:
-                logging.warning(f"Missing host ID in data point: {data_point}")
-                continue
-
-            if host_id not in host_name_cache:
-                host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
-
-            resolved_name = host_name_cache.get(host_id, host_id)
-            timestamps = data_point.get('timestamps', [])
-            values = data_point.get('values', [])
-
-            if resolved_name not in grouped_data:
-                grouped_data[resolved_name] = {}
-
-            grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
+        # For the disk used percentage metric (split by disk), iterate over each result.
+        if metric_name == "Average Disk Used Percentage":
+            for result in metric_data.get('result', []):
+                # Extract host_id and disk name from dimensions.
+                dimensions = result.get("dimensions", [])
+                host_id = dimensions[0] if dimensions else None
+                disk_name = dimensions[1] if len(dimensions) >= 2 else "Unknown Disk"
+                if not host_id:
+                    logging.warning(f"Missing host ID in result: {result}")
+                    continue
+                if host_id not in host_name_cache:
+                    host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+                resolved_name = host_name_cache.get(host_id, host_id)
+                # Use a combined key including the disk name.
+                key = f"Average Disk Used Percentage - {disk_name}"
+                for data_point in result.get('data', []):
+                    timestamps = data_point.get('timestamps', [])
+                    values = data_point.get('values', [])
+                    if resolved_name not in grouped_data:
+                        grouped_data[resolved_name] = {}
+                    grouped_data[resolved_name][key] = {"timestamps": timestamps, "values": values}
+        else:
+            # For all other metrics, use the original logic.
+            for data_point in metric_data.get('result', [])[0].get('data', []):
+                host_id = data_point.get('dimensions', [None])[0]
+                if not host_id:
+                    logging.warning(f"Missing host ID in data point: {data_point}")
+                    continue
+                if host_id not in host_name_cache:
+                    host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+                resolved_name = host_name_cache.get(host_id, host_id)
+                timestamps = data_point.get('timestamps', [])
+                values = data_point.get('values', [])
+                if resolved_name not in grouped_data:
+                    grouped_data[resolved_name] = {}
+                grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
-# This is the majick part of the journey. Here it starts to use the datas from the hostname part and the groups data part into a chart that can be put into the PDF in a human readable way. I
-# do not pretend to understand this wizardry completely but spending enough time on the matplotlib site and asking other pY wizards for suggestions, it did provide enough instruction
+# This is the majick part of the journey. Generates a graph for the given metric.
 def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric, applying necessary scaling adjustments.
     """
     try:
         if not timestamps or all(v is None for v in values):
-            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")  # You will see this in the logs if you look or like
-            #I do tail - f the .log but in most cases does not cause issues
+            logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")
             return None
 
-        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]  # Clocky stuff because HAL or Enterprises COmputer are not reading the output. Just us humans
+        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]  # Convert timestamps to datetime
 
-        # Apply scaling for Processor metric P.S. I might need to adjust some others but stopped here for now
+        # Apply scaling for specific metrics:
         if metric_name == "Processor":
-            values = [v * 100 for v in values]  # Convert to percentage (1-6 -> 100-600)
-        elif metric_name == "Average Disk Used Percentage":
-            values = [v * 1000 for v in values] # Change to x1000 percentage
+            values = [v * 100 for v in values]  # Scale processor values to percentage
+        # Removed the scaling block specific to "Average Disk Used Percentage" because individual disks are now separated.
         elif metric_name == "Disk Write Time Per Second":
             values = [v * 10 for v in values]
         elif metric_name in ["Network Adapter In", "Network Adapter Out"]:
-            #NEW: Converting bits per second to something more palatible
-            # If you need a somewhat different output, adjust the 1e6 divsor to what makes sense to you
-            values = [v /1024 for v in values]
+            # Converting bits per second to a more palatable value (adjust divisor as needed)
+            values = [v / 1024 for v in values]
 
-        plt.figure(figsize=(8, 4))  # Original chart dimensions restored. This is the chart size on the PDF page. Not to be confused with otther sizes
+        plt.figure(figsize=(8, 4))
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
-        plt.ylabel(y_label_map.get(metric_name, "millisecond"))  # Same as above. Might want to adjust others but for now I am happy with current MVP output.
-                   
-        plt.grid(True)  # Turn grid off and on
+        # Use the base metric name for y-label (e.g. if metric_name is "Average Disk Used Percentage - sda", use "Average Disk Used Percentage")
+        plt.ylabel(y_label_map.get(metric_name.split(" - ")[0], "millisecond"))
 
-        # Adjusted legend size and spacing. This is the little legend window. Still not sure it is useful but sems others in the FAQs are so for now, I left it
+        plt.grid(True)
         plt.legend(
             loc="upper right",
-            fontsize="medium",  # Increased font size
-            borderaxespad=1.5,  # Added padding around the legend box
-            labelspacing=1.0  # Increased spacing between legend entries
+            fontsize="medium",
+            borderaxespad=1.5,
+            labelspacing=1.0
         )
 
-        ax = plt.gca()  # -adjusting from time to date
-        ax.xaxis.set_major_formatter(DateFormatter("%d-%b-%y"))  # -adjusting from time to date. Time be like %H:%M and depending on the aggregation time, you may want to adjust tis. For my now-1w timeframe I want date
-        plt.xticks(rotation=15)  # Adjusting rotation to fit chart in such a way as to still be readable
+        ax = plt.gca()
+        ax.xaxis.set_major_formatter(DateFormatter("%d-%b-%y"))
+        plt.xticks(rotation=15)
 
-# New Work with Network Metrics when scientificate symbols happen
         if metric_name in ["Network Adapter In", "Network Adapter Out"]:
-            ax.ticklabel_format(style='plain', axis='y') #Disables the Scientific Notation 1e6, 1e8, etc
+            ax.ticklabel_format(style='plain', axis='y')
             ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
 
-        buffer = BytesIO()  # Some of that wizardry I am slowly wrapping my head around but am not the SME
-        plt.savefig(buffer, format='png')  # The charts on the PDF pages are png's
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png')
         buffer.seek(0)
         plt.close()
         logging.info(f"Graph successfully generated for metric '{metric_name}'.")
@@ -184,18 +196,16 @@ def generate_graph(timestamps, values, metric_name):
         logging.error(f"Error generating graph for metric '{metric_name}': {e}")
         return None
 
-# The file name is created based on initial inputs and as such make an ugly file name, so I cleaned it up
 def sanitize_filename(filename):
     """
     Sanitize the filename by replacing specific patterns while preserving other conventions.
     """
     if ':' in filename:
-        filename = re.sub(r'\s*:\s*', '_', filename)  # Replace colon and surrounding spaces with _
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)  # Remove invalid characters
-    filename = filename.strip()  # Strip leading/trailing spaces
+        filename = re.sub(r'\s*:\s*', '_', filename)
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    filename = filename.strip()
     return filename
 
-# THE MAJICK
 def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     """
     Create a PDF report organized by host, embedding the graphs for each metric.
@@ -229,9 +239,9 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     y_position -= 20
 
-    # NEW: Wrap host processing loop with progress indicator.
-    total_hosts = len(grouped_data)  # NOTES: Total number of hosts for progress.
-    host_start_time = time.time()  # NOTES: Start time for host processing. Al and I wanted a timer. Without some additional crazy coding, this is the best I can currently provide
+    # Wrap host processing loop with progress indicator.
+    total_hosts = len(grouped_data)
+    host_start_time = time.time()
     for idx, (host_name, metrics_data) in enumerate(grouped_data.items(), start=1):
         start_new_page()
         c.setFont("Helvetica-Bold", 14)
@@ -260,13 +270,13 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             y_position -= (chart_height + chart_spacing)
 
         # Update progress for host processing
-        print_progress(idx, total_hosts, host_start_time, prefix='Processing hosts')  # NOTES: Shows progress for each host processed. Al and I wanted a timer. Without some additional crazy coding, this is the best I can currently provide
+        print_progress(idx, total_hosts, host_start_time, prefix='Processing hosts')
 
     c.save()
 
 if __name__ == "__main__":
-    # NEW: Record overall start time for the script.
-    overall_start = time.time()  # NOTES: Overall script timer start. Al and I wanted a timer. Without some additional crazy coding, this is the best I can currently provide
+    # Record overall start time for the script.
+    overall_start = time.time()
 
     API_URL = input("Enter API URL: ").strip()
     API_TOKEN = input("Enter API Token: ").strip()
@@ -276,32 +286,30 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    # NEW: Replace dictionary comprehension with a loop that includes a progress indicator for fetching metrics.
+    # Replace dictionary comprehension with a loop that includes a progress indicator for fetching metrics.
     raw_data = {}
-    fetch_start_time = time.time()  # NOTES: Start time for fetching metrics.
-    total_metrics = len(metrics)  # NOTES: Total number of metrics for progress.
+    fetch_start_time = time.time()
+    total_metrics = len(metrics)
     for idx, (metric_name, metric_selector) in enumerate(metrics.items(), start=1):
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
-        print_progress(idx, total_metrics, fetch_start_time, prefix='Fetching metrics')  # NOTES: Shows progress for each metric fetched.
+        print_progress(idx, total_metrics, fetch_start_time, prefix='Fetching metrics')
 
     grouped_data = group_data(raw_data, API_URL, HEADERS)
     OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
 
-    # NEW: Logic around create_pdf. Only generate PDF if there is grouped data.
     if grouped_data:
-        print("Starting PDF generation...")  # NOTES: Indicate start of PDF generation.
-        pdf_start_time = time.time()  # NOTES: Start time for PDF generation.
+        print("Starting PDF generation...")
+        pdf_start_time = time.time()
         create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
-        pdf_end_time = time.time()  # NOTES: End time for PDF generation.
+        pdf_end_time = time.time()
         pdf_generation_time = pdf_end_time - pdf_start_time
-        print(f"PDF generation took: {pdf_generation_time:.2f} seconds")  # NOTES: Print PDF generation time.
+        print(f"PDF generation took: {pdf_generation_time:.2f} seconds")
         print(f"PDF report generated: {OUTPUT_PDF}")
     else:
-        print("No data available to generate PDF.")  # NOTES: Handle the case where no grouped data was returned.
+        print("No data available to generate PDF.")
 
-    # NEW: Record overall end time and print total running time.
-    overall_end = time.time()  # NOTES: Overall script timer end.
+    overall_end = time.time()
     total_running_time = overall_end - overall_start
-    print(f"Total running time: {total_running_time:.2f} seconds")  # NOTES: Display total script running time.
+    print(f"Total running time: {total_running_time:.2f} seconds")
 
     # THE END OF THE MAJICK
