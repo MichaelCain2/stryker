@@ -4,7 +4,7 @@ import logging
 import sys
 from datetime import datetime
 
-# Configure logging to file and console with identical formatting
+# Configure logging to file and console
 log_filename = f"simple_api_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     filename=log_filename,
@@ -27,9 +27,14 @@ def main():
 
     headers = {"Authorization": f"Api-Token {api_token}"}
 
-    # Build the Metrics API URL with exact quoting as required
+    # Build the Metrics API URL using exact quoting (this is critical to avoid 400 errors)
+    # Example: ...&entitySelector=type("HOST")&mzSelector=mzName("MyZone")
     metric = 'builtin:host.disk.usedPct:splitBy("dt.entity.disk")'
-    metric_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{management_zone}")&resolution={resolution}'
+    metric_url = (f'{api_url}?metricSelector={metric}'
+                  f'&from={agg_time}'
+                  f'&entitySelector=type("HOST")'
+                  f'&mzSelector=mzName("{management_zone}")'
+                  f'&resolution={resolution}')
     
     logging.info("Querying Metrics API...")
     logging.debug(f"Metrics URL: {metric_url}")
@@ -37,7 +42,8 @@ def main():
     logging.info(f"Metrics API status code: {response.status_code}")
     
     if response.status_code != 200:
-        logging.error("Error connecting to Metrics API")
+        logging.error("Error connecting to Metrics API. Response: " + response.text)
+        print("Error connecting to Metrics API")
         return
 
     data = response.json()
@@ -58,17 +64,17 @@ def main():
     disk_id = dims[0]
     logging.info(f"Extracted disk entity ID: {disk_id}")
 
-    # Construct the Entities API URL for the disk
+    # Build the Entities API URL for the disk
     base_url = api_url.split("metrics/query")[0]
     entity_url = f"{base_url}/entities/{disk_id}"
-    
     logging.info("Querying Entities API for disk entity...")
     logging.debug(f"Entities URL: {entity_url}")
     ent_response = requests.get(entity_url, headers=headers)
     logging.info(f"Entities API status code: {ent_response.status_code}")
     
     if ent_response.status_code != 200:
-        logging.error("Error connecting to Entities API for disk entity.")
+        logging.error("Error connecting to Entities API for disk entity. Response: " + ent_response.text)
+        print("Error connecting to Entities API for disk entity.")
         return
 
     ent_data = ent_response.json()
