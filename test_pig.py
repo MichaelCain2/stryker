@@ -23,18 +23,19 @@ def main():
     api_token = input("Enter API Token: ").strip()
     management_zone = input("Enter Management Zone: ").strip()
     agg_time = input("Enter Aggregation Time: ").strip()
-    resolution = input("Enter Resolution: ").strip()
+    resolution = input("Enter Resolution (leave empty if not applicable): ").strip()
 
     headers = {"Authorization": f"Api-Token {api_token}"}
 
-    # Build the Metrics API URL using exact quoting (this is critical to avoid 400 errors)
-    # Example: ...&entitySelector=type("HOST")&mzSelector=mzName("MyZone")
+    # Build the Metrics API URL using exact quoting (critical to avoid 400 errors)
+    # Only append &resolution= if a resolution value is provided.
     metric = 'builtin:host.disk.usedPct:splitBy("dt.entity.disk")'
+    resolution_param = f"&resolution={resolution}" if resolution else ""
     metric_url = (f'{api_url}?metricSelector={metric}'
                   f'&from={agg_time}'
                   f'&entitySelector=type("HOST")'
                   f'&mzSelector=mzName("{management_zone}")'
-                  f'&resolution={resolution}')
+                  f'{resolution_param}')
     
     logging.info("Querying Metrics API...")
     logging.debug(f"Metrics URL: {metric_url}")
@@ -64,9 +65,10 @@ def main():
     disk_id = dims[0]
     logging.info(f"Extracted disk entity ID: {disk_id}")
 
-    # Build the Entities API URL for the disk
+    # Construct the Entities API URL for the disk
     base_url = api_url.split("metrics/query")[0]
     entity_url = f"{base_url}/entities/{disk_id}"
+    
     logging.info("Querying Entities API for disk entity...")
     logging.debug(f"Entities URL: {entity_url}")
     ent_response = requests.get(entity_url, headers=headers)
