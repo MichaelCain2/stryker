@@ -27,8 +27,7 @@ def main():
 
     headers = {"Authorization": f"Api-Token {api_token}"}
 
-    # Build the Metrics API URL using exact quoting (critical to avoid 400 errors)
-    # Only append &resolution= if a resolution value is provided.
+    # Build the Metrics API URL using exact quoting (critical for success)
     metric = 'builtin:host.disk.usedPct:splitBy("dt.entity.disk")'
     resolution_param = f"&resolution={resolution}" if resolution else ""
     metric_url = (f'{api_url}?metricSelector={metric}'
@@ -55,20 +54,23 @@ def main():
         logging.error("No results returned from Metrics API.")
         return
 
-    # Extract the first disk entity ID from the first result's dimensions
-    first_result = results[0]
-    dims = first_result.get("dimensions", [])
-    if not dims:
-        logging.error("No dimensions found in first result.")
+    # Iterate over results to find the first with non-empty dimensions
+    disk_id = None
+    for result in results:
+        dims = result.get("dimensions", [])
+        if dims:
+            disk_id = dims[0]
+            logging.debug(f"Found dimensions in a result: {dims}")
+            break
+    if not disk_id:
+        logging.error("No dimensions found in any result.")
         return
 
-    disk_id = dims[0]
     logging.info(f"Extracted disk entity ID: {disk_id}")
 
     # Construct the Entities API URL for the disk
     base_url = api_url.split("metrics/query")[0]
     entity_url = f"{base_url}/entities/{disk_id}"
-    
     logging.info("Querying Entities API for disk entity...")
     logging.debug(f"Entities URL: {entity_url}")
     ent_response = requests.get(entity_url, headers=headers)
