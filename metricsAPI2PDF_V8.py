@@ -18,12 +18,12 @@ import time  # NOTES: Used for timing and ETA calculation.
 log_filename = f"MetricAPI2PDF_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Metrics definition that gets pulled via the API. These can be edited to pull mostly any of the 10,000 plus available metrics.
-# NOTICES: Updated "Average Disk Used Percentage" to split by diskName so that individual disks are returned.
+# Metrics definition that gets pulled via the API.
+# "Average Disk Used Percentage" now uses splitBy("dt.entity.disk"), returning DISK-XXXX entity IDs in the dimension.
 metrics = {
     "Processor": "builtin:host.cpu.usage",
     "Memory": "builtin:host.mem.usage",
-    "Average Disk Used Percentage": "builtin:host.disk.usedPct:splitBy(\"diskName\")",  # NOTES: Split by diskName.
+    "Average Disk Used Percentage": "builtin:host.disk.usedPct:splitBy(\"dt.entity.disk\")",
     "Average Disk Utilization Time": "builtin:host.disk.utilTime",
     "Disk Write Time Per Second": "builtin:host.disk.writeTime",
     "Average Disk Queue Length": "builtin:host.disk.queueLength",
@@ -43,17 +43,15 @@ y_label_map = {
     "Network Adapter Out": "MB per sec"
 }
 
-# NEW: Define a progress indicator helper function using only built-in modules.
 def print_progress(current, total, start_time, prefix='Progress'):
     """
     Prints a progress bar with percentage complete, elapsed time, and estimated time remaining.
-    #NOTES: This function is added to provide visual timing feedback to the user.
     """
     elapsed = time.time() - start_time
     progress = current / total
     eta = (elapsed / progress - elapsed) if progress > 0 else 0
 
-    bar_length = 30  # adjust the length of the progress bar as needed
+    bar_length = 30
     filled_length = int(round(bar_length * progress))
     bar = '=' * filled_length + '-' * (bar_length - filled_length)
 
@@ -73,7 +71,6 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
     response.raise_for_status()
     return response.json()
 
-# Dynatrace stores entities, like HOST-xxxxxxx so to convert that to hostname1234, we need to get the entity and go query entities API to get the answer.
 def fetch_host_name(api_url, headers, host_id):
     """
     Fetch human-readable hostname from the Entities API.
@@ -84,64 +81,111 @@ def fetch_host_name(api_url, headers, host_id):
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         entity_data = response.json()
-        display_name = entity_data.get("displayName", host_id)  # Fallback to host_id if displayName is missing
+        display_name = entity_data.get("displayName", host_id)  # Fallback if displayName is missing
         logging.debug(f"Resolved {host_id} to {display_name}")
         return display_name
     except requests.exceptions.RequestException as e:
         logging.warning(f"Error fetching display name for {host_id}: {e}")
         return host_id
 
-# Modified group_data function to handle split results for disk used percentage.
+# NEW: Function to find which host a disk belongs to, caching results to avoid multiple API calls per disk.
+disk_owner_cache = {}
+def fetch_disk_owner(api_url, headers, disk_id):
+    """
+    Fetch the host entity associated with a given disk entity (DISK-XXXX).
+    Returns the host entity ID or None if not found.
+    """
+    if disk_id in disk_owner_cache:
+        return disk_owner_cache[disk_id]  # Return cached value
+
+    base_url = api_url.split("metrics/query")[0]
+    url = f"{base_url}/entities/{disk_id}"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        entity_data = response.json()
+
+        # The exact JSON structure can vary. Typically, the relationship might be under:
+        # "fromRelationships": { "isDiskOf": ["HOST-XXXX"] }
+        # Adjust if your environment differs.
+        from_rels = entity_data.get("fromRelationships", {})
+        hosts = from_rels.get("isDiskOf", [])
+        if hosts:
+            host_id = hosts[0]
+            disk_owner_cache[disk_id] = host_id
+            return host_id
+        else:
+            logging.warning(f"No host relationship found for disk {disk_id}")
+            disk_owner_cache[disk_id] = None
+            return None
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Error fetching disk owner for {disk_id}: {e}")
+        disk_owner_cache[disk_id] = None
+        return None
+
 def group_data(raw_data, api_url, headers):
     """
     Group metrics data by resolved host names and metrics.
-    #NOTES: For "Average Disk Used Percentage", iterate over all result series (each representing an individual disk)
+    For "Average Disk Used Percentage", we now look up the owning host for each disk entity.
     """
     grouped_data = {}
     host_name_cache = {}
 
     for metric_name, metric_data in raw_data.items():
-        # For the disk used percentage metric (split by disk), iterate over each result.
         if metric_name == "Average Disk Used Percentage":
+            # Each 'result' corresponds to one disk series
             for result in metric_data.get('result', []):
-                # Extract host_id and disk name from dimensions.
                 dimensions = result.get("dimensions", [])
-                host_id = dimensions[0] if dimensions else None
-                disk_name = dimensions[1] if len(dimensions) >= 2 else "Unknown Disk"
-                if not host_id:
-                    logging.warning(f"Missing host ID in result: {result}")
+                disk_id = dimensions[0] if dimensions else None  # e.g. "DISK-XXXX"
+                if not disk_id:
+                    logging.warning(f"Missing disk ID in result: {result}")
                     continue
-                if host_id not in host_name_cache:
-                    host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
-                resolved_name = host_name_cache.get(host_id, host_id)
-                # Use a combined key including the disk name.
-                key = f"Average Disk Used Percentage - {disk_name}"
+
+                # 1) Find the host ID that owns this disk
+                owner_host_id = fetch_disk_owner(api_url, headers, disk_id)
+                if not owner_host_id:
+                    logging.warning(f"Could not find a host for disk {disk_id}")
+                    continue
+
+                # 2) Resolve the host's display name
+                if owner_host_id not in host_name_cache:
+                    host_name_cache[owner_host_id] = fetch_host_name(api_url, headers, owner_host_id)
+                resolved_host_name = host_name_cache.get(owner_host_id, owner_host_id)
+
+                # 3) Label the disk usage with something meaningful
+                disk_label = disk_id  # or you can fetch the disk's displayName if you like
+                key = f"Average Disk Used Percentage - {disk_label}"
+
+                # 4) Store the data under the resolved host
                 for data_point in result.get('data', []):
                     timestamps = data_point.get('timestamps', [])
                     values = data_point.get('values', [])
-                    if resolved_name not in grouped_data:
-                        grouped_data[resolved_name] = {}
-                    grouped_data[resolved_name][key] = {"timestamps": timestamps, "values": values}
+                    if resolved_host_name not in grouped_data:
+                        grouped_data[resolved_host_name] = {}
+                    grouped_data[resolved_host_name][key] = {"timestamps": timestamps, "values": values}
         else:
-            # For all other metrics, use the original logic.
+            # Original logic for all other metrics
             for data_point in metric_data.get('result', [])[0].get('data', []):
                 host_id = data_point.get('dimensions', [None])[0]
                 if not host_id:
                     logging.warning(f"Missing host ID in data point: {data_point}")
                     continue
+
                 if host_id not in host_name_cache:
                     host_name_cache[host_id] = fetch_host_name(api_url, headers, host_id)
+
                 resolved_name = host_name_cache.get(host_id, host_id)
                 timestamps = data_point.get('timestamps', [])
                 values = data_point.get('values', [])
+
                 if resolved_name not in grouped_data:
                     grouped_data[resolved_name] = {}
+
                 grouped_data[resolved_name][metric_name] = {"timestamps": timestamps, "values": values}
 
     logging.debug(f"Grouped Data: {grouped_data}")
     return grouped_data
 
-# This is the majick part of the journey. Generates a graph for the given metric.
 def generate_graph(timestamps, values, metric_name):
     """
     Generate a graph for the given metric, applying necessary scaling adjustments.
@@ -151,24 +195,23 @@ def generate_graph(timestamps, values, metric_name):
             logging.warning(f"Cannot generate graph for metric '{metric_name}': Missing or invalid data.")
             return None
 
-        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]  # Convert timestamps to datetime
+        datetime_timestamps = [datetime.fromtimestamp(ts / 1000) for ts in timestamps]
 
         # Apply scaling for specific metrics:
         if metric_name == "Processor":
-            values = [v * 100 for v in values]  # Scale processor values to percentage
-        # Removed the scaling block specific to "Average Disk Used Percentage" because individual disks are now separated.
+            values = [v * 100 if v is not None else 0 for v in values]  # Scale processor values to percentage
         elif metric_name == "Disk Write Time Per Second":
-            values = [v * 10 for v in values]
+            values = [v * 10 if v is not None else 0 for v in values]
         elif metric_name in ["Network Adapter In", "Network Adapter Out"]:
-            # Converting bits per second to a more palatable value (adjust divisor as needed)
-            values = [v / 1024 for v in values]
+            values = [v / 1024 if v is not None else 0 for v in values]
 
         plt.figure(figsize=(8, 4))
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
         plt.title(metric_name)
         plt.xlabel("")
-        # Use the base metric name for y-label (e.g. if metric_name is "Average Disk Used Percentage - sda", use "Average Disk Used Percentage")
-        plt.ylabel(y_label_map.get(metric_name.split(" - ")[0], "millisecond"))
+        # If metric_name is "Average Disk Used Percentage - DISK-XXXX", use "Average Disk Used Percentage"
+        base_metric_name = metric_name.split(" - ")[0]
+        plt.ylabel(y_label_map.get(base_metric_name, "millisecond"))
 
         plt.grid(True)
         plt.legend(
@@ -239,7 +282,6 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
 
     y_position -= 20
 
-    # Wrap host processing loop with progress indicator.
     total_hosts = len(grouped_data)
     host_start_time = time.time()
     for idx, (host_name, metrics_data) in enumerate(grouped_data.items(), start=1):
@@ -269,13 +311,11 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
             c.drawImage(temp_image_path, margin, y_position - chart_height, width=450, height=chart_height)
             y_position -= (chart_height + chart_spacing)
 
-        # Update progress for host processing
         print_progress(idx, total_hosts, host_start_time, prefix='Processing hosts')
 
     c.save()
 
 if __name__ == "__main__":
-    # Record overall start time for the script.
     overall_start = time.time()
 
     API_URL = input("Enter API URL: ").strip()
@@ -286,7 +326,7 @@ if __name__ == "__main__":
 
     HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
 
-    # Replace dictionary comprehension with a loop that includes a progress indicator for fetching metrics.
+    # Instead of a dict comprehension, we use a loop so we can show progress
     raw_data = {}
     fetch_start_time = time.time()
     total_metrics = len(metrics)
