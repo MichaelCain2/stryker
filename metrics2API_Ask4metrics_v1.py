@@ -40,6 +40,73 @@ def fetch_metrics(api_url, headers, metric, mz_selector, agg_time, resolution):
 
 # … [group_data, generate_graph, sanitize_filename, create_pdf unchanged] …
 
+# … [imports and logging setup unchanged] …
+
+def print_progress(current, total, start_time, prefix='Progress'):
+    """
+    Prints a progress bar with percentage complete, elapsed time, and ETA.
+    """
+    elapsed = time.time() - start_time
+    progress = current / total
+    eta = (elapsed / progress - elapsed) if progress > 0 else 0
+
+    bar_length = 30
+    filled_length = int(round(bar_length * progress))
+    bar = '=' * filled_length + '-' * (bar_length - filled_length)
+
+    sys.stdout.write(f'\r{prefix}: |{bar}| {progress*100:5.1f}% '
+                     f'Elapsed: {elapsed:5.1f}s ETA: {eta:5.1f}s')
+    sys.stdout.flush()
+    if current >= total:
+        sys.stdout.write('\n')
+
+
+# … [other helper functions unchanged] …
+
+if __name__ == "__main__":
+    overall_start = time.time()
+
+    API_URL = input("Enter API URL: ").strip()
+    API_TOKEN = input("Enter API Token: ").strip()
+    MZ_SELECTOR = input("Enter Management Zone Name: ").strip()
+    AGG_TIME = input("Enter Aggregation Time: ").strip()
+    RESOLUTION = input("Enter Resolution: ").strip()
+
+    # MODIFIED: Prompt for metrics at runtime
+    metrics_input = input(
+        "What metric or metrics are you looking to pull from the API? (comma separated full selectors)\n> "
+    ).split(",")
+    metrics = [m.strip() for m in metrics_input if m.strip()]
+
+    HEADERS = {"Authorization": f"Api-Token {API_TOKEN}"}
+
+    # Build raw_data from the user-provided metrics list
+    raw_data = {}
+    fetch_start_time = time.time()
+    total_metrics = len(metrics)
+    for idx, metric_selector in enumerate(metrics, start=1):
+        raw_data[metric_selector] = fetch_metrics(
+            API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION
+        )
+        print_progress(idx, total_metrics, fetch_start_time, prefix='Fetching metrics')
+
+    grouped_data = group_data(raw_data, API_URL, HEADERS)
+    OUTPUT_PDF = f"{sanitize_filename(MZ_SELECTOR)}-Dynatrace_Metrics_Report-" \
+                 f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf"
+
+    if grouped_data:
+        logging.info("Starting PDF generation...")
+        pdf_start_time = time.time()
+        create_pdf(grouped_data, MZ_SELECTOR, AGG_TIME, OUTPUT_PDF)
+        pdf_generation_time = time.time() - pdf_start_time
+        logging.info(f"PDF generation took: {pdf_generation_time:.2f} seconds")
+        logging.info(f"PDF report generated: {OUTPUT_PDF}")
+    else:
+        logging.info("No data available to generate PDF.")
+
+    total_running_time = time.time() - overall_start
+    logging.info(f"Total running time: {total_running_time:.2f} seconds")
+#Main
 if __name__ == "__main__":
     overall_start = time.time()
 
