@@ -1,3 +1,4 @@
+#Stryker Cain
 import requests  # … (same as before)
 import matplotlib.pyplot as plt
 from matplotlib.dates import DateFormatter
