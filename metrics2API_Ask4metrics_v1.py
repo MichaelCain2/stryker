@@ -1,5 +1,9 @@
 #API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
+
+# Auto-generate human-readable labels from metric selectors
+def format_metric_label(selector):
+    return selector.split(':')[-1].replace('.', ' ').title()
 import matplotlib.pyplot as plt  # This is the artist. We are using it to draw the charts ref -https://matplotlib.org/-
 from matplotlib.dates import DateFormatter, date2num  # Helps make time stuff readable converts this format like 17377632000, to 9/3/2520, 8:00:00 PM
 from io import BytesIO  # Digital notepad for storing datas
@@ -26,6 +30,7 @@ metrics = {
     # User-provided metric input replaces static dictionary
     metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
     metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
+    metric_labels = {k: format_metric_label(k) for k in metrics}
 
 # Needed Library for Y Label as many are different
 y_label_map = {
@@ -213,7 +218,7 @@ def generate_graph(timestamps, values, metric_name):
 
         plt.figure(figsize=(8, 4))
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
-        plt.title(metric_name)
+            plt.title(metric_labels.get(metric_name, metric_name))
         plt.xlabel("")
         # If metric_name is "Average Disk Used Percentage - DISK-XXXX", use "Average Disk Used Percentage"
         base_metric_name = metric_name.split(" - ")[0]
@@ -282,8 +287,8 @@ def create_pdf(grouped_data, management_zone, agg_time, output_pdf):
     c.drawString(margin, height - 110, "Resources/Metrics:")
 
     y_position = height - 130
-    for metric_name in metrics.keys():
-        c.drawString(margin + 20, y_position, f"- {metric_name}")
+    for metric_name in metrics:
+        c.drawString(margin + 20, y_position, f"- {metric_labels.get(metric_name, metric_name)}")
         y_position -= 15
 
     y_position -= 20
