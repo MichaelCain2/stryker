@@ -218,7 +218,7 @@ def generate_graph(timestamps, values, metric_name):
 
         plt.figure(figsize=(8, 4))
         plt.plot(datetime_timestamps, values, label=metric_name, marker='o', color='blue')
-            plt.title(metric_labels.get(metric_name, metric_name))
+        plt.title(metric_labels.get(metric_name, metric_name))
         plt.xlabel("")
         # If metric_name is "Average Disk Used Percentage - DISK-XXXX", use "Average Disk Used Percentage"
         base_metric_name = metric_name.split(" - ")[0]
