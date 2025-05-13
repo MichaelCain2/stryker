@@ -1,5 +1,5 @@
 
-# Stryker Cain - Validated Dynatrace Metrics PDF Report Script
+# Stryker Cain - Restored Dynatrace Metrics PDF Report Script (Validated)
 
 import requests
 import matplotlib.pyplot as plt
