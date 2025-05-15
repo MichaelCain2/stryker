@@ -4,7 +4,6 @@ import requests  # This is the internets errand boy. It is used to fetch stuff f
 # Auto-generate human-readable labels from metric selectors
 def format_metric_label(selector):
     return selector.split(':')[-1].replace('.', ' ').title()
-
 def infer_ylabel(cleaned_name):
     name = cleaned_name.lower()
     if "percentage" in name or "cpu" in name:
@@ -16,8 +15,6 @@ def infer_ylabel(cleaned_name):
     if "network" in name or "traffic" in name or "adapter" in name:
         return "MB/sec"
     return "Value"
-
-    return selector.split(':')[-1].replace('.', ' ').title()
 import matplotlib.pyplot as plt  # This is the artist. We are using it to draw the charts ref -https://matplotlib.org/-
 from matplotlib.dates import DateFormatter, date2num  # Helps make time stuff readable converts this format like 17377632000, to 9/3/2520, 8:00:00 PM
 from io import BytesIO  # Digital notepad for storing datas
@@ -40,11 +37,10 @@ logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctim
 
 # Metrics definition that gets pulled via the API.
 # "Average Disk Used Percentage" now uses splitBy("dt.entity.disk"), returning DISK-XXXX entity IDs in the dimension.
-metrics = {
-    # User-provided metric input replaces static dictionary
-    metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
-    metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
-    metric_labels = {k: format_metric_label(k) for k in metrics}
+# User-provided metric input replaces static dictionary
+metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
+metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
+metric_labels = {k: format_metric_label(k) for k in metrics}
 
 # Needed Library for Y Label as many are different
 y_label_map = {
