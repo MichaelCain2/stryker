@@ -37,11 +37,10 @@ logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctim
 
 # Metrics definition that gets pulled via the API.
 # "Average Disk Used Percentage" now uses splitBy("dt.entity.disk"), returning DISK-XXXX entity IDs in the dimension.
-# User-provided metric input replaces static dictionary
+    # User-provided metric input replaces static dictionary
 metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
 metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
 metric_labels = {k: format_metric_label(k) for k in metrics}
-
 # Needed Library for Y Label as many are different
 y_label_map = {
     "Processor": "Percentage across all CPUs",
@@ -232,7 +231,7 @@ def generate_graph(timestamps, values, metric_name):
         plt.xlabel("")
         # If metric_name is "Average Disk Used Percentage - DISK-XXXX", use "Average Disk Used Percentage"
         base_metric_name = metric_name.split(" - ")[0]
-            plt.ylabel(infer_ylabel(metric_labels.get(metric_name, metric_name)))
+        plt.ylabel(infer_ylabel(metric_labels.get(metric_name, metric_name)))
 
         plt.grid(True)
         plt.legend(
