@@ -3,6 +3,7 @@ import requests  # This is the internets errand boy. It is used to fetch stuff f
 
 # Auto-generate human-readable labels from metric selectors
 def format_metric_label(selector):
+    return selector.split(':')[-1].replace('.', ' ').title()
 
 def infer_ylabel(cleaned_name):
     name = cleaned_name.lower()
