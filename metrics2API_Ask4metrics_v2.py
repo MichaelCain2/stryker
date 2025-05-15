@@ -1,4 +1,4 @@
-e #API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
+#API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
 
 # Auto-generate human-readable labels from metric selectors
