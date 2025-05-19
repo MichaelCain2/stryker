@@ -1,12 +1,12 @@
-#API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
+e #API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
 
 # Auto-generate human-readable labels from metric selectors
-
 # Infer ylabel from live metadata
-def fetch_metric_metadata(api_url, headers, selector):
+def fetch_metric_metadata(headers, selector):
+    global API_URL
+    base_url = API_URL.split("/metrics/query")[0]
     try:
-        base_url = api_url.split("/metrics/query")[0]
         url = f"{base_url}/metrics/{selector}"
         response = requests.get(url, headers=headers)
         response.raise_for_status()
@@ -17,7 +17,6 @@ def fetch_metric_metadata(api_url, headers, selector):
     except Exception as e:
         logging.warning(f"Could not fetch metadata for {selector}: {e}")
         return "", selector
-
 def format_metric_label(selector):
     return selector.split(':')[-1].replace('.', ' ').title()
 def infer_ylabel(cleaned_name):
@@ -56,12 +55,6 @@ logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctim
     # User-provided metric input replaces static dictionary
 metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
 metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
-metric_labels = {}
-metric_units = {}
-for k in metrics:
-        unit, label = fetch_metric_metadata(API_URL, HEADERS, k)
-        metric_labels[k] = label
-        metric_units[k] = unit
 metric_labels = {k: format_metric_label(k) for k in metrics}
 # Needed Library for Y Label as many are different
 y_label_map = {
@@ -371,7 +364,16 @@ if __name__ == "__main__":
     # Instead of a dict comprehension, we use a loop so we can show progress
     raw_data = {}
     fetch_start_time = time.time()
-    total_metrics = len(metrics)
+    metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
+    metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
+    metric_labels = {}
+    metric_units = {}
+    global API_URL
+    base_url = API_URL.split("/metrics/query")[0]
+    for k in metrics:
+        unit, label = fetch_metric_metadata(HEADERS, k)
+        metric_labels[k] = label
+        metric_units[k] = unit
     for idx, (metric_name, metric_selector) in enumerate(metrics.items(), start=1):
         raw_data[metric_name] = fetch_metrics(API_URL, HEADERS, metric_selector, MZ_SELECTOR, AGG_TIME, RESOLUTION)
         print_progress(idx, total_metrics, fetch_start_time, prefix='Fetching metrics')
