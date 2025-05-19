@@ -2,8 +2,8 @@
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
 
 # Auto-generate human-readable labels from metric selectors
-def format_metric_label(selector):
-    return selector.split(':')[-1].replace('.', ' ').title()
+
+# Infer ylabel from live metadata
 def fetch_metric_metadata(api_url, headers, selector):
     try:
         base_url = api_url.split("/metrics/query")[0]
@@ -17,7 +17,10 @@ def fetch_metric_metadata(api_url, headers, selector):
     except Exception as e:
         logging.warning(f"Could not fetch metadata for {selector}: {e}")
         return "", selector
+
+def format_metric_label(selector):
     return selector.split(':')[-1].replace('.', ' ').title()
+def infer_ylabel(cleaned_name):
     name = cleaned_name.lower()
     if "percentage" in name or "cpu" in name:
         return "Percentage"
@@ -27,6 +30,7 @@ def fetch_metric_metadata(api_url, headers, selector):
         return "Count"
     if "network" in name or "traffic" in name or "adapter" in name:
         return "MB/sec"
+    return "Value"
 import matplotlib.pyplot as plt  # This is the artist. We are using it to draw the charts ref -https://matplotlib.org/-
 from matplotlib.dates import DateFormatter, date2num  # Helps make time stuff readable converts this format like 17377632000, to 9/3/2520, 8:00:00 PM
 from io import BytesIO  # Digital notepad for storing datas
@@ -52,12 +56,13 @@ logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctim
     # User-provided metric input replaces static dictionary
 metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
 metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
-    metric_labels = {}
-    metric_units = {}
-    for k in metrics:
+metric_labels = {}
+metric_units = {}
+for k in metrics:
         unit, label = fetch_metric_metadata(API_URL, HEADERS, k)
         metric_labels[k] = label
         metric_units[k] = unit
+metric_labels = {k: format_metric_label(k) for k in metrics}
 # Needed Library for Y Label as many are different
 y_label_map = {
     "Processor": "Percentage across all CPUs",
@@ -389,4 +394,4 @@ if __name__ == "__main__":
     total_running_time = overall_end - overall_start
     print(f"Total running time: {total_running_time:.2f} seconds")
 
- 
+    # THE END OF THE MAJICK
