@@ -1,9 +1,9 @@
-e #API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
+#API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
 
 # Auto-generate human-readable labels from metric selectors
 def format_metric_label(selector):
-# Infer ylabel from live metadata
+    return selector.split(':')[-1].replace('.', ' ').title()
 def fetch_metric_metadata(api_url, headers, selector):
     try:
         base_url = api_url.split("/metrics/query")[0]
@@ -389,4 +389,4 @@ if __name__ == "__main__":
     total_running_time = overall_end - overall_start
     print(f"Total running time: {total_running_time:.2f} seconds")
 
-    # THE END OF THE MAJICK
+ 
