@@ -1,10 +1,8 @@
-e #API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
+#API2PDF Script by Stryker Cain 30 APR 2025 https://github.ec.va.gov/Michael-Cain4/API2PDF_Reporting/blob/main/metricsAPI2PDF_Final_V11.py
 import requests  # This is the internets errand boy. It is used to fetch stuff from URLs and we are using it in part to query the API URL
 
 # Auto-generate human-readable labels from metric selectors
-# Infer ylabel from live metadata
 def fetch_metric_metadata(headers, selector):
-    global API_URL
     base_url = API_URL.split("/metrics/query")[0]
     try:
         url = f"{base_url}/metrics/{selector}"
@@ -17,6 +15,7 @@ def fetch_metric_metadata(headers, selector):
     except Exception as e:
         logging.warning(f"Could not fetch metadata for {selector}: {e}")
         return "", selector
+
 def format_metric_label(selector):
     return selector.split(':')[-1].replace('.', ' ').title()
 def infer_ylabel(cleaned_name):
@@ -366,9 +365,9 @@ if __name__ == "__main__":
     fetch_start_time = time.time()
     metrics_input = input("Enter one or more metric selectors (comma separated): ").split(",")
     metrics = {metric.strip(): metric.strip() for metric in metrics_input if metric.strip()}
+    total_metrics = len(metrics)
     metric_labels = {}
     metric_units = {}
-    global API_URL
     base_url = API_URL.split("/metrics/query")[0]
     for k in metrics:
         unit, label = fetch_metric_metadata(HEADERS, k)
