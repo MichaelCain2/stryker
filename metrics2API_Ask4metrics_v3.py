@@ -245,7 +245,15 @@ def generate_graph(timestamps, values, metric_name):
         plt.xlabel("")
         # If metric_name is "Average Disk Used Percentage - DISK-XXXX", use "Average Disk Used Percentage"
         base_metric_name = metric_name.split(" - ")[0]
-        plt.ylabel(metric_units.get(metric_name, "Value"))
+        # Auto-scale Byte units to GB and disable scientific notation
+        if metric_units.get(metric_name, '') == 'Byte':
+            values = [v / (1024**3) for v in values]  # Convert Bytes to GB
+            ax = plt.gca()
+            ax.ticklabel_format(style='plain', axis='y')
+            ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+            plt.ylabel('GB')
+        else:
+            plt.ylabel(metric_units.get(metric_name, 'Value'))
 
         plt.grid(True)
         plt.legend(
