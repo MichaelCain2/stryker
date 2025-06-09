@@ -1,69 +1,71 @@
-
 import requests
 import csv
 import logging
 from datetime import datetime
 
-# Configure logging with an incrementing filename
-log_counter = 1
-while True:
-    log_filename = f"metric_usage_log_{log_counter}.log"
-    try:
-        with open(log_filename, "x") as f:
-            break
-    except FileExistsError:
-        log_counter += 1
+# Setup logging with sequential filename
+def get_next_log_filename(base_name):
+    index = 1
+    while True:
+        filename = f"{base_name}_{index}.log"
+        if not os.path.exists(filename):
+            return filename
+        index += 1
 
-logging.basicConfig(filename=log_filename, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+log_filename = get_next_log_filename("MetricUsageSummary")
+logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Prompt for required inputs
-api_url = input("Enter the Dynatrace API URL (e.g., https://your-environment.com/api/v2/metrics): ").strip()
-api_token = input("Enter your Dynatrace API Token: ").strip()
-start_time = input("Enter start time (e.g., now-1h): ").strip()
-end_time = input("Enter end time (e.g., now): ").strip()
+# Prompt user for input
+api_url = input("Enter Dynatrace API URL (e.g., https://yourdomain/e/yourenv/api/v2/metrics/usage): ").strip()
+api_token = input("Enter Dynatrace API Token: ").strip()
+from_time = input("Enter start timeframe (e.g., now-2h): ").strip()
+to_time = input("Enter end timeframe (e.g., now): ").strip()
 
 headers = {
-    "Authorization": f"Api-Token {api_token}"
+    "Authorization": f"Api-Token {api_token}",
+    "Accept": "application/json"
 }
 
 params = {
-    "from": start_time,
-    "to": end_time,
+    "from": from_time,
+    "to": to_time,
     "pageSize": 500
 }
 
-metrics_usage = {}
+metrics = []
 
-print("Fetching metric usage...")
-
-next_page_key = None
-while True:
-    if next_page_key:
-        response = requests.get(f"{api_url}?nextPageKey={next_page_key}", headers=headers)
-    else:
-        response = requests.get(api_url, headers=headers, params=params)
-
-    if response.status_code != 200:
-        logging.error(f"Failed API call. Status Code: {response.status_code}, Response: {response.text}")
-        print("Error fetching data. Check log for details.")
-        break
-
+try:
+    response = requests.get(api_url, headers=headers, params=params)
+    response.raise_for_status()
     data = response.json()
 
-    for metric in data.get("metrics", []):
-        metrics_usage[metric] = metrics_usage.get(metric, 0) + 1
+    # Collect metrics from first page
+    if "metrics" in data:
+        metrics.extend(data["metrics"])
 
-    next_page_key = data.get("nextPageKey")
-    if not next_page_key:
-        break
+    # Handle pagination
+    while "nextPageKey" in data:
+        logging.info("Fetching next page of data...")
+        next_params = {
+            "nextPageKey": data["nextPageKey"]
+        }
+        response = requests.get(api_url, headers=headers, params=next_params)
+        response.raise_for_status()
+        data = response.json()
+        if "metrics" in data:
+            metrics.extend(data["metrics"])
 
-# Save to CSV
-csv_filename = f"metric_usage_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-with open(csv_filename, mode="w", newline="") as file:
-    writer = csv.writer(file)
-    writer.writerow(["Metric Name", "Usage Count"])
-    for metric, count in metrics_usage.items():
-        writer.writerow([metric, count])
+    # Write to CSV
+    csv_filename = f"MetricUsageSummary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    with open(csv_filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Metric ID", "Count"])
+        for metric in metrics:
+            writer.writerow([metric.get("metricId", ""), metric.get("count", 0)])
 
-print(f"Metric usage statistics saved to: {csv_filename}")
-logging.info(f"Metric usage statistics saved to: {csv_filename}")
+    logging.info(f"Summary written to {csv_filename}")
+    print(f"Summary written to {csv_filename}")
+
+except Exception as e:
+    logging.error(f"An error occurred: {e}")
+    print(f"Error: {e}")
