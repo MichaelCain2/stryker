@@ -1,59 +1,66 @@
 import requests
 import json
 import csv
-import time
-from datetime import datetime
 import os
+from datetime import datetime
 import logging
 
 # Setup logging
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_filename = f"dynatrace_metrics_query_{timestamp}.log"
-logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+log_filename = f"dynatrace_metrics_query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(filename=log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# REPLACE with your values
-api_url = "https://your.dynatrace.instance/api"  # ← Change this
-api_token = "dt0c01.XXXXXXXXXXXXXXXXXXXXXXXX"     # ← And this
+# Prompt user for required inputs
+base_url = input("Enter Dynatrace API base URL (e.g., https://your.domain.com): ").strip()
+api_token = input("Enter API token: ").strip()
 
-# Initial setup
+# Create output filenames
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+json_filename = f"metrics_output_{timestamp}.json"
+csv_filename = f"metrics_list_{timestamp}.csv"
+
+# Setup headers
 headers = {
-    "Authorization": f"Api-Token {api_token}",
-    "Content-Type": "application/json"
+    "Authorization": f"Api-Token {api_token}"
 }
 
-base_url = f"{api_url}/v2/metrics?pageSize=500&fields=metricId"
+# Initialize request
+initial_url = f"{base_url}/api/v2/metrics?pageSize=500&fields=metricId"
+metric_ids = []
 
-all_metrics = []
-next_page_key = None
+try:
+    response = requests.get(initial_url, headers=headers)
+    response.raise_for_status()
+    data = response.json()
 
-while True:
-    try:
-        url = base_url if not next_page_key else f"{api_url}/v2/metrics?nextPageKey={next_page_key}&fields=metricId"
-        response = requests.get(url, headers=headers)
+    # Save first page of JSON response
+    with open(json_filename, "w") as json_file:
+        json.dump(data, json_file, indent=2)
+
+    # Extract metricIds
+    for item in data.get("metrics", []):
+        metric_ids.append(item)
+
+    # Handle pagination with nextPageKey
+    next_page_key = data.get("nextPageKey")
+    while next_page_key:
+        next_url = f"{base_url}/api/v2/metrics?nextPageKey={next_page_key}"
+        response = requests.get(next_url, headers=headers)
         response.raise_for_status()
-
         data = response.json()
-        all_metrics.extend(data.get("metrics", []))
-        next_page_key = data.get("nextPageKey", None)
+        for item in data.get("metrics", []):
+            metric_ids.append(item)
+        next_page_key = data.get("nextPageKey")
 
-        if not next_page_key:
-            break
+    # Write metrics to CSV
+    with open(csv_filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["metricId"])
+        for metric in metric_ids:
+            writer.writerow([metric])
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request failed: {e}")
-        break
+    logging.info(f"Script completed successfully. Output written to {csv_filename}")
 
-# Save to JSON
-json_filename = f"dynatrace_metrics_{timestamp}.json"
-with open(json_filename, "w") as json_file:
-    json.dump(all_metrics, json_file, indent=4)
-    logging.info(f"Saved JSON output to {json_filename}")
-
-# Extract metricIds and save to CSV
-csv_filename = f"dynatrace_metrics_{timestamp}.csv"
-with open(csv_filename, "w", newline="") as csv_file:
-    writer = csv.writer(csv_file)
-    writer.writerow(["metricId"])
-    for metric in all_metrics:
-        writer.writerow([metric])
-    logging.info(f"Saved CSV output to {csv_filename}")
+except requests.exceptions.RequestException as e:
+    logging.error(f"Request failed: {e}")
+except Exception as ex:
+    logging.error(f"An error occurred: {ex}")
