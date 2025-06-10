@@ -3,57 +3,71 @@ import json
 import csv
 import time
 from datetime import datetime
-import os
 import logging
+import os
 
-# Setup logging
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_filename = f"dynatrace_metrics_query_{timestamp}.log"
-logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+# Logging setup with rotating file names
+log_dir = "./"
+existing_logs = [f for f in os.listdir(log_dir) if f.startswith("metrics2csv_") and f.endswith(".log")]
+log_count = len(existing_logs) + 1
+log_filename = os.path.join(log_dir, f"metrics2csv_{log_count}.log")
 
-# REPLACE with your values
-api_url = "https://your.dynatrace.instance/api"  # ← Change this
-api_token = "dt0c01.XXXXXXXXXXXXXXXXXXXXXXXX"     # ← And this
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-# Initial setup
+# User inputs
+api_url = input("Enter Dynatrace API URL (e.g., https://yourdomain.com/api/v2/metrics): ").strip()
+api_token = input("Enter Dynatrace API Token: ").strip()
+
 headers = {
-    "Authorization": f"Api-Token {api_token}",
-    "Content-Type": "application/json"
+    "Authorization": f"Api-Token {api_token}"
 }
 
-base_url = f"{api_url}/v2/metrics?pageSize=500&fields=metricId"
+params = {
+    "pageSize": 500,
+    "fields": "displayName",
+    "writtenSince": "now-1w"
+}
 
 all_metrics = []
-next_page_key = None
 
-while True:
-    try:
-        url = base_url if not next_page_key else f"{api_url}/v2/metrics?nextPageKey={next_page_key}"
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
+try:
+    response = requests.get(api_url, headers=headers, params=params)
+    response.raise_for_status()
+    data = response.json()
+    all_metrics.extend(data.get("metrics", []))
+    logging.info("Initial batch fetched successfully.")
 
-        data = response.json()
+    # Handle nextPageKey
+    while "nextPageKey" in data:
+        next_key = data["nextPageKey"]
+        next_response = requests.get(f"{api_url}?nextPageKey={next_key}", headers=headers)
+        next_response.raise_for_status()
+        data = next_response.json()
         all_metrics.extend(data.get("metrics", []))
-        next_page_key = data.get("nextPageKey", None)
+        logging.info(f"Fetched page with nextPageKey: {next_key}")
 
-        if not next_page_key:
-            break
+except requests.exceptions.RequestException as e:
+    logging.error(f"Error fetching metrics: {e}")
+    print("Error during API request. Check log for details.")
+    exit(1)
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request failed: {e}")
-        break
-
-# Save to JSON
-json_filename = f"dynatrace_metrics_{timestamp}.json"
-with open(json_filename, "w") as json_file:
-    json.dump(all_metrics, json_file, indent=4)
-    logging.info(f"Saved JSON output to {json_filename}")
-
-# Extract metricIds and save to CSV
-csv_filename = f"dynatrace_metrics_{timestamp}.csv"
-with open(csv_filename, "w", newline="") as csv_file:
-    writer = csv.writer(csv_file)
-    writer.writerow([metric['metricId'].replace(\"{'metricId': '\", '').replace(\"'}\", '')])
-    for metric in all_metrics:
-        writer.writerow([metric['metricId'].replace(\"{'metricId': '\", '').replace(\"'}\", '')])
-    logging.info(f"Saved CSV output to {csv_filename}")
+# Write metricId values to CSV, stripped clean
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+csv_filename = f"metric_ids_{timestamp}.csv"
+try:
+    with open(csv_filename, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        for metric in all_metrics:
+            metric_id = metric.get("metricId", "")
+            if metric_id:
+                cleaned = metric_id.strip()
+                writer.writerow([cleaned])
+    logging.info(f"Metrics successfully written to {csv_filename}")
+    print(f"Success! {len(all_metrics)} metrics written to {csv_filename}")
+except Exception as e:
+    logging.error(f"Error writing to CSV: {e}")
+    print("Error during CSV writing. Check log for details.")
