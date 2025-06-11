@@ -1,66 +1,76 @@
 
 import requests
-import csv
 import logging
 from datetime import datetime
+from urllib.parse import quote
+import csv
+import os
 
-# Setup logging
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_filename = f"metric_list_{timestamp}.log"
-logging.basicConfig(filename=log_filename, level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# Prompt for inputs
-api_url_base = input("Enter the base Dynatrace API URL (e.g., https://your-domain.com): ").strip()
-api_token = input("Enter your Dynatrace API token: ").strip()
-start_timeframe = input("Enter the start timeframe (e.g., now-1w): ").strip()
-
-# Construct API URL with parameters
-params = {
-    "pageSize": 500,
-    "fields": "displayName",
-    "writtenSince": start_timeframe
-}
-
-headers = {
-    "Authorization": f"Api-Token {api_token}",
-    "Content-Type": "application/json"
-}
-
-api_url = f"{api_url_base}/api/v2/metrics"
-all_metrics = []
-
-try:
+# Generate unique log filename
+def get_log_filename(base_name="metrics_trigger_log"):
+    counter = 1
     while True:
-        response = requests.get(api_url, headers=headers, params=params)
-        response.raise_for_status()
+        filename = f"{base_name}_{counter}.log"
+        if not os.path.exists(filename):
+            return filename
+        counter += 1
+
+# Configure logging
+log_filename = get_log_filename()
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+def main():
+    try:
+        base_url = input("Enter Dynatrace API base URL (e.g., https://yourdomain.com/api/v2): ").strip()
+        api_token = input("Enter Dynatrace API token: ").strip()
+        timeframe = input("Enter timeframe (e.g., now-1h or now-1d): ").strip()
+
+        headers = {
+            "Authorization": f"Api-Token {api_token}",
+            "Accept": "application/json"
+        }
+
+        # Placeholder metricSelector. Replace or allow user input for dynamic selection if needed
+        query_url = f"{base_url}/metrics/query?metricSelector=builtin%3Ahost.cpu.usage&from={quote(timeframe)}"
+
+        logging.info(f"Querying: {query_url}")
+        response = requests.get(query_url, headers=headers)
+
+        if response.status_code != 200:
+            logging.error(f"Failed to fetch data: {response.status_code} {response.text}")
+            print("API request failed. Check log for details.")
+            return
+
         data = response.json()
 
-        for metric in data.get("metrics", []):
-            metric_id = metric.get("metricId")
-            if metric_id:
-                all_metrics.append([metric_id])
+        # Extract time series counts per metric
+        metrics_summary = []
+        for result in data.get("result", []):
+            metric_id = result.get("metricId", "Unknown")
+            datapoints_count = 0
+            for series in result.get("data", []):
+                datapoints_count += len(series.get("values", []))
+            metrics_summary.append({
+                "Metric Key": metric_id,
+                "Times Triggered": datapoints_count
+            })
 
-        if "nextPageKey" in data:
-            api_url = f"{api_url_base}/api/v2/metrics"
-            params = {
-                "nextPageKey": data["nextPageKey"]
-            }
-        else:
-            break
+        # Write output to CSV
+        output_filename = "metric_triggers_summary.csv"
+        with open(output_filename, mode="w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=["Metric Key", "Times Triggered"])
+            writer.writeheader()
+            writer.writerows(metrics_summary)
 
-    csv_filename = f"available_metrics_{timestamp}.csv"
-    with open(csv_filename, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Metric ID"])
-        writer.writerows(all_metrics)
+        logging.info(f"Summary written to {output_filename}")
+        print(f"CSV report generated: {output_filename}")
 
-    logging.info(f"Successfully written {len(all_metrics)} metrics to {csv_filename}")
-    print(f"Metric list written to {csv_filename}")
+    except Exception as e:
+        logging.exception("Script failed with an exception")
+        print("An error occurred. Check log for details.")
 
-except requests.RequestException as e:
-    logging.error(f"API request failed: {e}")
-    print(f"API request failed: {e}")
-
-except Exception as e:
-    logging.error(f"Unexpected error: {e}")
-    print(f"Unexpected error: {e}")
+main()
