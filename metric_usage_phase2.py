@@ -1,69 +1,69 @@
+
 import requests
 import csv
+import json
 import logging
 from datetime import datetime
-import os
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 
 # Setup logging
-log_filename = f"dynatrace_phase2_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-logging.basicConfig(
-    filename=log_filename,
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_filename = f"dynatrace_metrics_phase2_{timestamp}.log"
+logging.basicConfig(filename=log_filename, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def prompt_user_input():
-    url = input("Enter your Dynatrace API URL (e.g., https://your.domain/e/yourenv/api): ").strip()
-    token = input("Enter your Dynatrace API Token: ").strip()
-    timeframe = input("Enter the start timeframe (e.g., now-1h): ").strip()
+# Prompt for required information
+api_url = input("Enter Dynatrace API URL (e.g., https://your.domain.com/e/yourenv/api): ").strip()
+api_token = input("Enter API Token: ").strip()
+start_timeframe = input("Enter Start Timeframe (e.g., now-1h): ").strip()
 
-    # Open file explorer to select CSV file
-    print("Please select the CSV file containing metric IDs.")
-    Tk().withdraw()
-    csv_path = askopenfilename(title="Select Metric CSV File")
+# Prompt for CSV file using file dialog
+Tk().withdraw()
+csv_file_path = askopenfilename(title="Select the metrics CSV file", filetypes=[("CSV files", "*.csv")])
 
-    return url, token, timeframe, csv_path
+if not csv_file_path:
+    logging.error("No CSV file selected. Exiting.")
+    print("No CSV file selected. Exiting.")
+    exit(1)
 
-def query_metric_data(api_url, token, timeframe, csv_file):
-    output_csv = f"metric_data_count_20250611_174956.csv"
+headers = {
+    "Authorization": f"Api-Token {api_token}"
+}
 
-    with open(csv_file, "r") as file, open(output_csv, "w", newline="") as out_file:
-        reader = csv.reader(file)
-        writer = csv.writer(out_file)
-        writer.writerow(["metricId", "dataPointCount"])
+output_data = []
 
-        for row in reader:
-            if not row: continue
-            metric_id = row[0].strip()
-            full_url = f"{api_url}/v2/metrics/query?metricSelector={metric_id}&from={timeframe}"
+with open(csv_file_path, 'r') as csvfile:
+    csvreader = csv.reader(csvfile)
+    for row in csvreader:
+        if not row:
+            continue
+        metric_selector = row[0].strip()  # FIXED: Actually use value from CSV
+        url = f"{api_url}/v2/metrics/query?metricSelector={metric_selector}&from={start_timeframe}"
 
-            headers = {
-                "Authorization": f"Api-Token {token}"
-            }
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
 
-            try:
-                response = requests.get(full_url, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+            # Count number of datapoints
+            total_count = 0
+            for series in data.get("result", []):
+                for dp in series.get("data", []):
+                    total_count += 1
 
-                if "result" in data and data["result"]:
-                    total_points = 0
-                    for item in data["result"]:
-                        for ts in item.get("data", []):
-                            total_points += len(ts.get("values", []))
-                    writer.writerow([metric_id, total_points])
-                    logging.info(f"Metric: {metric_id}, Data Points: {total_points}")
-                else:
-                    writer.writerow([metric_id, 0])
-                    logging.warning(f"No data for metric: {metric_id}")
-            except Exception as e:
-                logging.error(f"Error fetching metricId {metric_id}: {str(e)}")
-                writer.writerow([metric_id, "ERROR"])
+            output_data.append([metric_selector, total_count])
+            logging.info(f"Processed {metric_selector} with {total_count} datapoints")
 
-    print(f"Metric query results saved to: {output_csv}")
+        except requests.exceptions.HTTPError as http_err:
+            logging.error(f"HTTP error for {metric_selector}: {http_err}")
+        except Exception as err:
+            logging.error(f"Error fetching {metric_selector}: {err}")
 
-if __name__ == "__main__":
-    api_url, token, timeframe, csv_file = prompt_user_input()
-    query_metric_data(api_url, token, timeframe, csv_file)
+# Write results to CSV
+output_filename = f"metric_datapoint_counts_{timestamp}.csv"
+with open(output_filename, 'w', newline='') as f:
+    writer = csv.writer(f)
+    for entry in output_data:
+        writer.writerow(entry)
+
+print(f"Summary written to {output_filename}")
