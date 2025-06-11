@@ -1,66 +1,90 @@
 import requests
 import csv
+import json
+import os
 import logging
 from datetime import datetime
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename
+import tkinter as tk
+from tkinter import filedialog
 
-# Configure logging
+# Logging Setup
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 log_filename = f"dynatrace_metrics_phase2_{timestamp}.log"
-logging.basicConfig(filename=log_filename, level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-# Prompt user for API URL, token, timeframe, and Management Zone
-api_url = input("Enter Dynatrace API URL (e.g., https://your-domain/api/v2/metrics/query): ").strip()
+# Prompt for user inputs
+base_url = input("Enter Dynatrace base URL (e.g., https://your.domain/e/ENV_ID): ").strip()
 api_token = input("Enter Dynatrace API Token: ").strip()
-timeframe = input("Enter the start of the timeframe (e.g., now-1h): ").strip()
-management_zone = input("Enter the Management Zone name (or leave blank if none): ").strip()
+timeframe = input("Enter timeframe (e.g., now-1h): ").strip()
+mz_name = input("Enter Management Zone name exactly as it appears (case-sensitive): ").strip()
 
-# File selection dialog
-print("Please select the CSV file containing metricIds:")
-Tk().withdraw()
-csv_file_path = askopenfilename(filetypes=[("CSV Files", "*.csv")])
+# GUI file picker for CSV
+root = tk.Tk()
+root.withdraw()
+csv_file_path = filedialog.askopenfilename(title="Select the CSV file with metricIds", filetypes=[("CSV files", "*.csv")])
 
-# Read metrics from the CSV file
-with open(csv_file_path, 'r') as f:
-    metrics = [line.strip() for line in f if line.strip()]
+if not csv_file_path:
+    print("No CSV file selected. Exiting.")
+    exit()
+
+# Read metricIds from CSV
+with open(csv_file_path, 'r') as csvfile:
+    reader = csv.reader(csvfile)
+    metrics = [row[0].strip() for row in reader if row]
+
+# Prepare output files
+output_json = f"metrics_raw_{timestamp}.json"
+output_csv = f"metrics_summary_{timestamp}.csv"
+
+summary_data = []
 
 # Process each metric
-results = []
-headers = {"Authorization": f"Api-Token {api_token}"}
-
-for metric_id in metrics:
+for metric in metrics:
     try:
-        # Build the URL with optional Management Zone
-        query_url = f"{api_url}?metricSelector={metric_id}&from={timeframe}"
-        if management_zone:
-            query_url += f"&mzSelector=mzName("{management_zone}")"
+        query_url = (
+            f"{base_url}/api/v2/metrics/query"
+            f"?metricSelector={metric}"
+            f"&from={timeframe}"
+            f"&mzSelector=mzName(\"{mz_name}\")"
+        )
+
+        headers = {
+            "Authorization": f"Api-Token {api_token}"
+        }
 
         response = requests.get(query_url, headers=headers)
         response.raise_for_status()
+
         data = response.json()
+        logging.info(f"Fetched data for metric: {metric}")
 
-        # Count the number of data points
-        data_count = 0
-        for result in data.get('result', []):
-            for series in result.get('data', []):
-                values = series.get('values', [])
-                data_count += len([v for v in values if v is not None])
+        # Write to JSON file (append mode)
+        with open(output_json, 'a') as jsonfile:
+            json.dump({metric: data}, jsonfile)
+            jsonfile.write('\n')
 
-        logging.info(f"Fetched data for metric: {metric_id} with {data_count} values")
-        results.append((metric_id, data_count))
+        # Count data points in the time series
+        count = 0
+        for series in data.get("result", []):
+            for datapoint in series.get("data", []):
+                count += len(datapoint[1:])  # counting data points
+
+        summary_data.append([metric, count])
 
     except Exception as e:
-        logging.error(f"Error fetching metricId {metric_id}: {e}")
-        results.append((metric_id, "ERROR"))
+        logging.error(f"Error fetching metric {metric}: {str(e)}")
+        summary_data.append([metric, "ERROR"])
 
 # Write summary to CSV
-output_csv = f"metric_data_counts_{timestamp}.csv"
-with open(output_csv, 'w', newline='') as f:
-    writer = csv.writer(f)
+with open(output_csv, 'w', newline='') as csvfile:
+    writer = csv.writer(csvfile)
     writer.writerow(["MetricId", "DataPointCount"])
-    writer.writerows(results)
+    writer.writerows(summary_data)
 
-logging.info(f"Summary written to {output_csv}")
-print(f"Script completed. Results saved to {output_csv} and log file to {log_filename}")
+print(f"Summary written to {output_csv}")
+print(f"Raw JSON data written to {output_json}")
+print(f"Log written to {log_filename}")
