@@ -3,64 +3,62 @@ import json
 import csv
 import logging
 from datetime import datetime
+import os
 
-# === CONFIGURATION ===
-API_URL = "https://your-dynatrace-url.com/api/v2/metrics"
+# === SET THESE BEFORE RUNNING ===
+API_URL = "https://your.dynatrace.instance/api/v2/metrics"
 API_TOKEN = "your_api_token_here"
+OUTPUT_JSON = "dynatrace_metrics.json"
+OUTPUT_CSV = "dynatrace_metrics.csv"
+# ================================
 
-# === SETUP LOGGING ===
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_filename = f"metrics_query_{timestamp}.log"
-logging.basicConfig(
-    filename=log_filename,
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Logging Setup
+log_filename = f"dynatrace_metric_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_path = os.path.join(os.getcwd(), log_filename)
+logging.basicConfig(filename=log_path, level=logging.DEBUG,
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 
-# === HEADERS FOR API REQUEST ===
-headers = {
-    "Authorization": f"Api-Token {API_TOKEN}"
+HEADERS = {
+    "Authorization": f"Api-Token {API_TOKEN}",
+    "Content-Type": "application/json"
 }
 
-# === INITIALIZE ===
-metrics = []
-params = {
-    "pageSize": 500
-}
+all_metrics = []
+next_page_key = None
 
 try:
-    response = requests.get(API_URL, headers=headers, params=params)
-    response.raise_for_status()
-    data = response.json()
-    metrics.extend(data.get("metrics", []))
-    logging.info(f"Fetched {len(data.get('metrics', []))} metrics on first page.")
+    while True:
+        if next_page_key:
+            url = f"{API_URL}?nextPageKey={next_page_key}"
+        else:
+            url = f"{API_URL}?pageSize=500"
 
-    # Write first page to JSON
-    json_filename = f"metrics_raw_{timestamp}.json"
-    with open(json_filename, "w") as jf:
-        json.dump(data, jf, indent=2)
+        logging.debug(f"Requesting: {url}")
+        response = requests.get(url, headers=HEADERS)
 
-    # Handle nextPageKey pagination
-    while "nextPageKey" in data:
-        next_key = data["nextPageKey"]
-        next_params = {"nextPageKey": next_key}
-        response = requests.get(API_URL, headers=headers, params=next_params)
-        response.raise_for_status()
+        if response.status_code != 200:
+            logging.error(f"Error {response.status_code}: {response.text}")
+            break
+
         data = response.json()
-        metrics.extend(data.get("metrics", []))
-        logging.info(f"Fetched {len(data.get('metrics', []))} more metrics.")
+        all_metrics.extend(data.get("metrics", []))
+        next_page_key = data.get("nextPageKey")
+        if not next_page_key:
+            break
 
-    # Save only metricId to CSV
-    csv_filename = f"metrics_ids_{timestamp}.csv"
-    with open(csv_filename, "w", newline="") as cf:
-        writer = csv.writer(cf)
-        for metric in metrics:
-            metric_id = metric.get("metricId", "").strip()
-            if metric_id:
-                writer.writerow([metric_id])
-    logging.info(f"Successfully wrote {len(metrics)} metric IDs to CSV.")
+    # Write raw output to JSON
+    with open(OUTPUT_JSON, "w") as f_json:
+        json.dump(all_metrics, f_json, indent=2)
+    logging.info(f"Full JSON written to {OUTPUT_JSON}")
 
-except requests.exceptions.RequestException as e:
-    logging.error(f"API request failed: {str(e)}")
-except Exception as ex:
-    logging.error(f"An error occurred: {str(ex)}")
+    # Write clean metricIds to CSV
+    with open(OUTPUT_CSV, "w", newline="") as f_csv:
+        writer = csv.writer(f_csv)
+        writer.writerow(["metricId"])
+        for item in all_metrics:
+            if isinstance(item, str):
+                writer.writerow([item])
+    logging.info(f"Metric IDs written to {OUTPUT_CSV}")
+
+except Exception as e:
+    logging.exception("Unhandled error occurred:")
