@@ -1,114 +1,67 @@
-import os
-import json
-import csv
-import logging
 import requests
+import csv
+import json
+import logging
 from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog
-
-# Timestamp for unique file names
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
 
 # Setup logging
-log_filename = f"metric_data_fetch_{timestamp}.log"
-logging.basicConfig(
-    filename=f"metric_data_fetch_{timestamp}.log",
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_filename = f"metric_count_log_{timestamp}.log"
+logging.basicConfig(filename=log_filename, level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Prompt user to select CSV file using file dialog
-def select_csv_file():
-    root = tk.Tk()
-    root.withdraw()
-    file_path = filedialog.askopenfilename(
-        title="Select the CSV file with metric IDs",
-        filetypes=[("CSV files", "*.csv")]
-    )
-    return file_path
+# Prompt for CSV file
+Tk().withdraw()
+csv_file_path = askopenfilename(title="Select CSV file with metric IDs", filetypes=[("CSV files", "*.csv")])
+if not csv_file_path:
+    print("No file selected. Exiting.")
+    exit()
+
+# Prompt for Dynatrace API details
+api_url = input("Enter your Dynatrace API base URL (e.g., https://your.domain/e/yourenv/api): ").strip().rstrip("/")
+api_token = input("Enter your Dynatrace API token: ").strip()
+timeframe = input("Enter the timeframe (e.g., now-1h, now-7d): ").strip()
+
+headers = {
+    "Authorization": f"Api-Token {api_token}",
+    "Content-Type": "application/json"
+}
+
+# Prepare output filenames
+base_filename = os.path.splitext(os.path.basename(csv_file_path))[0]
+output_json = f"{base_filename}_counts_{timestamp}.json"
+output_csv = f"{base_filename}_counts_{timestamp}.csv"
+
+results = {}
 
 # Read metric IDs from CSV
-def read_metric_ids(file_path):
+with open(csv_file_path, "r") as f:
+    metric_ids = [line.strip() for line in f if line.strip()]
+
+# Fetch data for each metric
+for metric_id in metric_ids:
     try:
-        with open(file_path, "r") as f:
-            return [line.strip() for line in f.readlines() if line.strip()]
+        query_url = f"{api_url}/v2/metrics/query?metricId={metric_id}&resolution=Inf&from={timeframe}"
+        response = requests.get(query_url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        count = sum(len(series["data"]) for result in data.get("result", []) for series in result.get("data", []))
+        results[metric_id] = count
+        logging.info(f"Fetched {count} datapoints for {metric_id}")
     except Exception as e:
-        logging.error(f"Failed to read CSV: {e}")
-        return []
+        logging.error(f"Error fetching {metric_id}: {e}")
 
-# Prompt for user inputs
-def get_user_inputs():
-    api_url = input("Enter Dynatrace API URL (base, not including /metrics): ").strip()
-    token = input("Enter API Token: ").strip()
-    start_time = input("Enter start timeframe (e.g., now-1h): ").strip()
-    end_time = input("Enter end timeframe (e.g., now): ").strip()
-    return api_url, token, start_time, end_time
+# Save results to JSON
+with open(output_json, "w") as jf:
+    json.dump(results, jf, indent=2)
 
-# Fetch metric usage
-def fetch_metric_counts(api_url, token, metrics, start, end):
-    headers = {"Authorization": f"Api-Token {token}"}
-    metric_data = {}
+# Save results to CSV
+with open(output_csv, "w", newline="") as cf:
+    writer = csv.writer(cf)
+    for metric_id, count in results.items():
+        writer.writerow([metric_id, count])
 
-    for metric_id in metrics:
-        params = {
-            "metricSelector": metric_id,
-            "resolution": "Inf",
-            "from": start,
-            "to": end,
-        }
-
-        try:
-            response = requests.get(f"{api_url}/metrics/query", headers=headers, params=params)
-            response.raise_for_status()
-            data = response.json()
-
-            try:
-                count = sum(len(series["data"]) for series in data["result"][0]["data"])
-            except Exception:
-                count = 0
-
-            metric_data[metric_id] = count
-            logging.info(f"Metric {metric_id} has {count} data points.")
-
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error fetching {metric_id}: {e}")
-            metric_data[metric_id] = 0
-
-    return metric_data
-
-# Write output to files
-def write_outputs(metric_data):
-    json_file = f"metric_counts_{timestamp}.json"
-    csv_file = f"metric_counts_{timestamp}.csv"
-
-    try:
-        with open(json_file, "w") as jf:
-            json.dump(metric_data, jf, indent=2)
-        logging.info(f"JSON output written to {json_file}")
-
-        with open(csv_file, "w", newline="") as cf:
-            writer = csv.writer(cf)
-            for metric_id, count in metric_data.items():
-                writer.writerow([metric_id, count])
-        logging.info(f"CSV output written to {csv_file}")
-    except Exception as e:
-        logging.error(f"Failed to write output files: {e}")
-
-def main():
-    csv_path = select_csv_file()
-    if not os.path.exists(csv_path):
-        logging.error("CSV file not found.")
-        return
-
-    metrics = read_metric_ids(csv_path)
-    if not metrics:
-        logging.error("No metric IDs loaded.")
-        return
-
-    api_url, token, start, end = get_user_inputs()
-    results = fetch_metric_counts(api_url, token, metrics, start, end)
-    write_outputs(results)
-
-if __name__ == "__main__":
-    main()
+print(f"JSON output saved to: {output_json}")
+print(f"CSV output saved to: {output_csv}")
+print(f"Log file created: {log_filename}")
