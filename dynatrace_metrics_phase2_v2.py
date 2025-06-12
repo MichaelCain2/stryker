@@ -2,71 +2,80 @@ import requests
 import csv
 import json
 import logging
+import os
 from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog, simpledialog
+from tkinter import Tk, filedialog
 
-def fetch_metrics(api_url, headers, metric, mz_selector, agg_time):
-    """
-    Fetch metrics from the Dynatrace API.
-    """
-    query_url = f'{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type("HOST")&mzSelector=mzName("{mz_selector}")'
-    logging.debug(f"Fetching metrics with URL: {query_url}")
-    response = requests.get(query_url, headers=headers)
-    response.raise_for_status()
-    return response.json()
+def setup_logging(log_filename):
+    logging.basicConfig(
+        filename=log_filename,
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+def prompt_for_file():
+    root = Tk()
+    root.withdraw()
+    filepath = filedialog.askopenfilename(title="Select CSV with Metric IDs", filetypes=[("CSV files", "*.csv")])
+    return filepath
 
 def main():
-    # Setup logging
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"metrics_phase2_log_{timestamp}.log"
-    logging.basicConfig(filename=os.path.join("/mnt/data", log_filename), level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-    logging.info("Starting Dynatrace Metrics Phase 2 Script")
-
-    # Tkinter root setup for dialogs
-    root = tk.Tk()
-    root.withdraw()
-
-    # Prompt user for necessary inputs
-    api_url = simpledialog.askstring("API URL", "Enter the full Dynatrace API URL (e.g., https://your.env/e/your_id/api/v2/metrics/query):")
-    api_token = simpledialog.askstring("API Token", "Enter your Dynatrace API token:", show='*')
-    agg_time = simpledialog.askstring("Aggregation Time", "Enter the start timeframe (e.g., now-1h, now-1d, now-7d):")
-    mz_selector = simpledialog.askstring("Management Zone", "Enter the Management Zone name exactly as defined in Dynatrace:")
-    csv_file_path = filedialog.askopenfilename(title="Select the CSV file with metrics", filetypes=[("CSV files", "*.csv")])
+    api_url = input("Enter the Dynatrace API URL (e.g., https://your.env/e/yourID/api/v2/metrics/query): ").strip()
+    token = input("Enter your Dynatrace API token: ").strip()
+    agg_time = input("Enter the timeframe (e.g., now-1h): ").strip()
+    management_zone = input("Enter the Management Zone name: ").strip()
 
     headers = {
-        "Authorization": f"Api-Token {api_token}",
-        "Content-Type": "application/json"
+        "Authorization": f"Api-Token {token}"
     }
 
-    metrics_counts = []
+    csv_file = prompt_for_file()
 
-    try:
-        with open(csv_file_path, newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            for row in reader:
-                metric = row[0].strip()
-                try:
-                    data = fetch_metrics(api_url, headers, metric, mz_selector, agg_time)
-                    count = sum(len(series.get("data", [])) for series in data.get("result", [{}])[0].get("data", []))
-                    metrics_counts.append({"metricId": metric, "count": count})
-                    logging.info(f"Metric {metric} has {count} datapoints.")
-                except Exception as e:
-                    logging.error(f"Error fetching metric {metric}: {e}")
-    except Exception as e:
-        logging.error(f"Error reading CSV: {e}")
+    log_filename = "dynatrace_metrics_phase2_log_20250612_112908.log"
+    csv_output = "dynatrace_metrics_summary_20250612_112908.csv"
+    json_output = "dynatrace_metrics_data_20250612_112908.json"
 
-    # Output results to CSV
-    output_csv_path = os.path.join("/mnt/data", f"{base_filename}_results.csv")
-    try:
-        with open(output_csv_path, mode='w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["metricId", "count"])
-            writer.writeheader()
-            for entry in metrics_counts:
-                writer.writerow(entry)
-        logging.info(f"Metrics summary written to {output_csv_path}")
-    except Exception as e:
-        logging.error(f"Error writing output CSV: {e}")
+    setup_logging(log_filename)
+
+    summary = []
+
+    with open(csv_file, 'r') as infile:
+        metrics = infile.read().splitlines()
+
+    for metric in metrics:
+        metric = metric.strip()
+        if not metric:
+            continue
+
+        query_url = f"{api_url}?metricSelector={metric}&from={agg_time}&entitySelector=type(\"HOST\")&mzSelector=mzName(\"{management_zone}\")"
+
+        logging.info(f"Querying URL: {query_url}")
+        try:
+            response = requests.get(query_url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+
+            with open(json_output, 'a') as jf:
+                json.dump(data, jf)
+                jf.write("\n")
+
+            count = 0
+            if "result" in data and data["result"]:
+                for series in data["result"]:
+                    count += len(series.get("data", []))
+
+            summary.append([metric, count])
+            logging.info(f"Metric: {metric}, Count: {count}")
+
+        except Exception as e:
+            logging.error(f"Error fetching metric {metric}: {str(e)}")
+            summary.append([metric, "Error"])
+
+    with open(csv_output, 'w', newline='') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerows(summary)
+
+    logging.info(f"Summary written to {csv_output}")
 
 if __name__ == "__main__":
     main()
